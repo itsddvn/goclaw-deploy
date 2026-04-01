@@ -1,30 +1,28 @@
 # GoClaw All-in-One — Local build mode (build from source + pgAdmin)
 #
 # Prerequisites:
-#   Clone goclaw-core source to ../goclaw-core (sibling directory)
+#   1. goclaw-core is included as a git submodule
+#   2. Build core image first: make build-local
 #
 # Usage:
-#   docker compose -f docker-compose-build.yml up -d --build
+#   make build-local
+#   docker compose -f docker-compose-build.yml up -d
 #
-# Dashboard: http://localhost:3000
-# API:       http://localhost:3000/v1/
+# Dashboard: http://localhost (or https://<domain> if GOCLAW_DOMAIN is set)
+# API:       http://localhost/v1/
 # pgAdmin:   http://localhost:5050
 
 services:
   goclaw:
     platform: linux/amd64
-    build:
-      context: ../goclaw-core
-      dockerfile: ${PWD}/Dockerfile
-      additional_contexts:
-        deploy: .
-      args:
-        VERSION: ${GOCLAW_VERSION:-dev}
+    image: ${GOCLAW_IMAGE:-itsddvn/goclaw}:${GOCLAW_VERSION:-latest}
     ports:
-      - "${GOCLAW_UI_PORT:-3000}:18790"
+      - "${GOCLAW_HTTP_PORT:-80}:8080"
+      - "${GOCLAW_HTTPS_PORT:-443}:8443"
     volumes:
       - goclaw-data:/app/data
       - goclaw-workspace:/app/workspace
+      - caddy-data:/data
     env_file:
       - path: .env
         required: false
@@ -33,6 +31,7 @@ services:
       GOCLAW_MODE: managed
       GOCLAW_SKILLS_DIR: /app/data/skills
       GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      GOCLAW_DOMAIN: ${GOCLAW_DOMAIN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,5 +88,6 @@ services:
 volumes:
   goclaw-data:
   goclaw-workspace:
+  caddy-data:
   pgdata:
   pgadmin-data:

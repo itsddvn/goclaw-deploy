@@ -7,17 +7,19 @@ Complete overview of GoClaw Deploy architecture, component interactions, and dat
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ User Browser                                                │
-│ http://localhost:3000                                       │
+│ http://localhost (or https://your-domain)                   │
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTP/WebSocket
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Docker Container (Alpine Linux)                             │
 │ ┌───────────────────────────────────────────────────────┐   │
-│ │ nginx (Port 8080)                                     │   │
+│ │ Caddy (Port 8080 HTTP / 8443 HTTPS)                   │   │
 │ │ - Reverse proxy for API (http://127.0.0.1:18790)     │   │
 │ │ - WebSocket proxy for real-time updates              │   │
 │ │ - Static SPA files (React)                           │   │
+│ │ - Auto HTTPS via Let's Encrypt (when GOCLAW_DOMAIN   │   │
+│ │   is set)                                            │   │
 │ └───────────────────┬───────────────────────────────────┘   │
 │                     │                                        │
 │ ┌───────────────────▼───────────────────────────────────┐   │
@@ -56,7 +58,7 @@ Complete overview of GoClaw Deploy architecture, component interactions, and dat
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS go-builder
 
 Purpose: Compile Go binary with cross-platform support
-Input:   ../goclaw-core (go.mod, *.go, migrations/)
+Input:   ./goclaw-core (go.mod, *.go, migrations/)
 Output:  /out/goclaw (stripped, static binary)
 
 Steps:
@@ -77,7 +79,7 @@ Steps:
 FROM --platform=$BUILDPLATFORM node:22-alpine AS web-builder
 
 Purpose: Build React SPA
-Input:   ../goclaw-core/ui/web/ (source + pnpm-lock.yaml)
+Input:   ./goclaw-core/ui/web/ (source + pnpm-lock.yaml)
 Output:  /app/dist (Vite static bundle)
 
 Steps:
@@ -97,16 +99,16 @@ Inputs:
   - /out/goclaw from go-builder
   - /src/migrations/ from go-builder
   - /app/dist from web-builder
-  - nginx.conf from deploy context
+  - Caddyfile.http and Caddyfile.https from deploy context
   - entrypoint.sh from deploy context
 
 Outputs:
   - Image: ~500MB total
   - User: goclaw:goclaw (non-root)
-  - Exposed: Port 8080
+  - Exposed: Port 8080 (HTTP), 8443 (HTTPS)
 
 Setup:
-1. Install ca-certificates, nginx
+1. Install ca-certificates, caddy
 2. Create non-root user/group
 3. Copy binary, migrations, SPA, configs
 4. Create app directories (/app/workspace, /app/data, etc.)
@@ -132,17 +134,15 @@ Setup:
 ├── sessions/                # Session store (volume mount)
 └── .goclaw/                 # Hidden dotdir (volume mount)
 
-/usr/share/nginx/html/       # SPA static files (from builder)
+/app/dist/                   # SPA static files (from builder)
 ├── index.html
 ├── assets/
 │   ├── index-*.js          # Vite-hashed JS chunks
 │   └── index-*.css         # Vite-hashed CSS chunks
 └── ...
 
-/var/log/nginx/              # nginx logs
-/run/nginx/                  # nginx pid/socket
-/etc/nginx/http.d/
-└── default.conf             # Custom config (from deploy)
+/tmp/Caddyfile               # Runtime-rendered Caddy config (HTTP or HTTPS mode)
+# Caddy logs to stderr (captured by Docker: docker compose logs goclaw)
 ```
 
 ## Process Management
@@ -170,9 +170,9 @@ Setup:
    ├── /app/goclaw &
    │   └── Sets GOCLAW_PID
    │   └── Port 18790
-   └── nginx -g 'daemon off;' &
-       └── Sets NGINX_PID
-       └── Port 8080
+   └── caddy run --config /tmp/Caddyfile &
+       └── Sets CADDY_PID
+       └── Port 8080 (HTTP) / 8443 (HTTPS)
 
 4. Set signal trap:
    └── trap shutdown SIGTERM SIGINT
@@ -180,7 +180,7 @@ Setup:
        └── Wait for graceful shutdown
 
 5. Monitor loop:
-   └── while kill -0 "$GOCLAW_PID" "$NGINX_PID"; do sleep 1; done
+   └── while kill -0 "$GOCLAW_PID" "$CADDY_PID"; do sleep 1; done
        ├── Exit when either process dies
        └── Call shutdown (kills survivor)
 ```
@@ -203,11 +203,12 @@ Start → Migrations → Both Ready → Serve → Signal → Graceful Shutdown
 
 ## Networking & Reverse Proxy
 
-### nginx Port Mapping
+### Caddy Port Mapping
 
 ```
 Host Port              Container Port           Target
-3000 (default)    →    8080 (nginx)        →   Internal routing
+80 (default)      →    8080 (Caddy HTTP)   →   Internal routing
+443 (HTTPS mode)  →    8443 (Caddy HTTPS)  →   Internal routing (requires GOCLAW_DOMAIN)
                                                ├── /v1/* → goclaw:18790
                                                ├── /ws → goclaw:18790 (WebSocket)
                                                ├── /health → goclaw:18790
@@ -215,15 +216,19 @@ Host Port              Container Port           Target
                                                └── /* → /index.html (SPA fallback)
 ```
 
-### nginx Routing Rules
+### Caddy Routing Rules
+
+The active Caddyfile is rendered at runtime to `/tmp/Caddyfile`. Two templates are provided:
+
+- `Caddyfile.http` — HTTP-only mode (default, no `GOCLAW_DOMAIN`)
+- `Caddyfile.https` — Auto HTTPS mode (used when `GOCLAW_DOMAIN` is set)
 
 #### API Proxy (/v1/)
-```nginx
-location /v1/ {
-    proxy_pass http://127.0.0.1:18790;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+```caddy
+reverse_proxy /v1/* 127.0.0.1:18790 {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
 }
 ```
 
@@ -233,30 +238,12 @@ location /v1/ {
 - `X-Forwarded-For` — Chain of proxy IPs
 
 #### WebSocket Proxy (/ws)
-```nginx
-location /ws {
-    proxy_pass http://127.0.0.1:18790;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_read_timeout 86400s;     # 24 hours (long-lived)
-}
-```
-
-**Critical headers:**
-- `Upgrade: websocket` — Signal HTTP upgrade
-- `Connection: upgrade` — Upgrade the connection
-- `proxy_read_timeout` — Prevent premature timeout
+Caddy handles WebSocket upgrades automatically when proxying — no special configuration needed. Long-lived connections are supported natively.
 
 #### Static Assets (/assets/)
-```nginx
-location /assets/ {
-    expires 1y;
-    add_header Cache-Control "public, immutable";
-}
+```caddy
+@assets path /assets/*
+header @assets Cache-Control "public, max-age=31536000, immutable"
 ```
 
 **Why aggressive caching?**
@@ -265,10 +252,10 @@ location /assets/ {
 - Safe to cache 1 year
 
 #### SPA Fallback (/)
-```nginx
-location / {
-    try_files $uri $uri/ /index.html;
-}
+```caddy
+root * /app/dist
+try_files {path} /index.html
+file_server
 ```
 
 **Why necessary?**
@@ -278,10 +265,12 @@ location / {
 
 ### Security Headers
 
-```nginx
-add_header X-Content-Type-Options "nosniff" always;
-add_header X-Frame-Options "SAMEORIGIN" always;
-add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+```caddy
+header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+}
 ```
 
 | Header | Value | Purpose |
@@ -356,7 +345,7 @@ User Browser
     ↓
 HTTP POST /v1/chat
     ↓
-nginx (reverse proxy)
+Caddy (reverse proxy)
     ↓
 GoClaw Backend (port 18790)
     ├─ Parse request
@@ -366,7 +355,7 @@ GoClaw Backend (port 18790)
     ├─ Generate embeddings (pgvector)
     └─ Return response
     ↓
-nginx (proxy response)
+Caddy (proxy response)
     ↓
 User Browser (React SPA updates UI)
 ```
@@ -378,7 +367,7 @@ User Browser
     ↓
 WebSocket /ws
     ↓
-nginx (upgrade to WebSocket protocol)
+Caddy (upgrade to WebSocket protocol)
     ↓
 GoClaw Backend
     ├─ Accept WebSocket connection
@@ -386,7 +375,7 @@ GoClaw Backend
     ├─ Send status updates
     └─ Notify on completion
     ↓
-nginx (stream to browser)
+Caddy (stream to browser)
     ↓
 User Browser (React updates in real-time)
 ```
@@ -404,14 +393,14 @@ entrypoint.sh runs
     ├─ Check GOCLAW_MODE=managed
     ├─ Run goclaw upgrade (schema migrations)
     ├─ Start goclaw background process
-    └─ Start nginx background process
+    └─ Start caddy background process
     ↓
-nginx loads config, listens :8080
+Caddy loads /tmp/Caddyfile, listens :8080 (and :8443 if GOCLAW_DOMAIN set)
     ↓
 goclaw listens :18790
     ↓
 healthcheck probes /health
-    ├─ nginx responds
+    ├─ Caddy responds
     └─ goclaw responds
     ↓
 Container marked healthy
@@ -439,7 +428,7 @@ Ready (~10s)
 1. Checkout main in goclaw-core
 2. Fetch upstream, merge upstream/main into fork/main
 3. Checkout develop, merge main into develop
-4. Auto-review config diffs (Dockerfile, nginx.conf)
+4. Auto-review config diffs (Dockerfile, Caddyfile.http)
 5. Clean containers, test build
 6. Build multi-arch, push to Docker Hub
 7. Update compose files, smoke test, commit
@@ -451,7 +440,7 @@ Ready (~10s)
 ```
 docker compose -f docker-compose-build.yml up -d --build
     ↓
-Build from ../goclaw-core (stage 1: Go, stage 2: Web, stage 3: runtime)
+Build from ./goclaw-core (stage 1: Go, stage 2: Web, stage 3: runtime)
     ↓
 Start container
     ↓
@@ -473,7 +462,7 @@ Services join dokploy-network
     ↓
 Dokploy-managed reverse proxy routes to goclaw
     ↓
-ngix in container only handles /v1/, /ws, static files
+Caddy in container only handles /v1/, /ws, static files
     ↓
 Platform handles external HTTPS termination
 ```
@@ -502,9 +491,9 @@ Host OS
 
 ### Network Isolation
 ```
-Container network only exposes port 8080
+Container network only exposes port 8080 (HTTP) and 8443 (HTTPS)
     ↓
-Host port 3000 (docker compose mapping)
+Host port 80 / 443 (docker compose mapping)
     ↓
 All internal services (goclaw:18790) only accessible from localhost/docker network
     ↓
@@ -545,9 +534,9 @@ deploy:
 ```
 Multiple containers, load-balanced externally:
 
-LB → Container 1 (port 3000)
-  → Container 2 (port 3001)
-  → Container 3 (port 3002)
+LB → Container 1 (port 80)
+  → Container 2 (port 8001)
+  → Container 3 (port 8002)
     ↓
 Shared PostgreSQL (all containers)
 Shared volumes (shared NFS or S3)
@@ -586,7 +575,7 @@ docker compose ps
 
 Provided by GoClaw backend (/health):
 ```json
-GET http://localhost:3000/health
+GET http://localhost/health
 
 Response:
 {
@@ -606,7 +595,7 @@ Response:
 
 ### Memory Usage
 - **Container limit:** 1GB (soft), may burst slightly
-- **nginx:** ~20MB
+- **caddy:** ~30MB
 - **goclaw:** ~100-200MB (depends on loaded agents)
 - **PostgreSQL:** ~50-100MB (depends on data size)
 

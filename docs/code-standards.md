@@ -11,7 +11,7 @@ Standards and patterns used throughout the goclaw-deploy repository.
 | Docker | PascalCase, descriptive | Dockerfile, Dockerfile.prod | No extensions |
 | Compose | kebab-case-yml | docker-compose.yml, docker-compose-build.yml | Variant names clear |
 | Shell | kebab-case.sh | entrypoint.sh, release.sh | Executable bit set |
-| Config | lowercase-ini/conf | nginx.conf, .env.example | Standard formats |
+| Config | lowercase/kebab | Caddyfile.http, .env.example | Standard formats |
 | Docs | kebab-case.md | code-standards.md, system-architecture.md | Markdown docs |
 | Ignore | dot-prefixed | .gitignore, .dockerignore | Standard patterns |
 
@@ -22,7 +22,8 @@ goclaw-deploy/
 ├── Dockerfile                    # Single multi-stage build
 ├── *.sh                          # Executable scripts
 ├── docker-compose*.yml           # Three variants (prod, dev, dokploy)
-├── nginx.conf                    # Reverse proxy config
+├── Caddyfile.http                # HTTP-only reverse proxy config
+├── Caddyfile.https               # Auto HTTPS reverse proxy config
 ├── Makefile                      # Build targets
 ├── .env.example                  # Template (not .env)
 ├── README.md                     # Quick start
@@ -54,15 +55,15 @@ FROM alpine
 **Rationale:** Minimize final image size, security (no build tools).
 
 ### Pattern: Named Build Contexts
-Allow copying files from sibling repos without bloating Docker context.
+goclaw-core is included as a git submodule at ./goclaw-core, so build contexts can copy files without bloating the Docker context.
 
 ```dockerfile
-COPY --from=deploy nginx.conf /etc/nginx/http.d/default.conf
+COPY Caddyfile.http Caddyfile.https /app/
 ```
 
 Build command:
 ```bash
-docker buildx build --build-context deploy=. -f Dockerfile ../goclaw-core
+docker buildx build --build-context deploy=. -f Dockerfile ./goclaw-core
 ```
 
 ### Pattern: Cross-Platform Compilation
@@ -179,7 +180,7 @@ services:
 services:
   goclaw:
     build:                       # From source
-      context: ../goclaw-core
+      context: ./goclaw-core
       dockerfile: ${PWD}/Dockerfile
 ```
 
@@ -286,7 +287,7 @@ trap "rm -f $LOCKFILE" EXIT
 
 ### Pattern: Variable Defaults
 ```makefile
-GOCLAW_DIR ?= ../goclaw
+GOCLAW_DIR ?= ./goclaw-core
 IMAGE      ?= itsddvn/goclaw
 VERSION    ?= $(shell git describe --tags 2>/dev/null || echo dev)
 ```
@@ -340,38 +341,40 @@ VAR_NAME=                    # Description or empty placeholder
 - No default values (users must fill in)
 - Comments explain purpose
 
-### nginx.conf
+### Caddyfile
 Standards for reverse proxy configuration.
 
 **Pattern:**
-```nginx
-server {
-    listen 8080;
-    server_name _;
+```caddyfile
+:8080 {
+    root * /app/dist
+    encode gzip
 
     # Security headers
-    add_header X-Content-Type-Options "nosniff" always;
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+    }
 
-    # Proxy rules
-    location /api/ {
-        proxy_pass http://backend:port;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+    # API proxy
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:18790
     }
 
     # SPA fallback
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
+    try_files {path} /index.html
+    file_server
 }
 ```
 
 **Rules:**
-- Listen on 8080 (container internal port)
-- Add security headers
-- Forward X-Real-IP and X-Forwarded-For
-- Use localhost/127.0.0.1 for same-container backends
-- Always include SPA fallback route
+- Listen on 8080 (HTTP) / 8443 (HTTPS) — high ports for no-new-privileges
+- Add security headers via `header` block
+- Use `handle` directives for route-specific proxying
+- Use 127.0.0.1 for same-container backends
+- Always include SPA fallback with `try_files`
+- Use `envsubst` for domain-based HTTPS config
 
 ## Process Management Standards
 
@@ -436,7 +439,7 @@ trap cleanup EXIT
 do_sync() {
   # Checkout main, fetch upstream, merge upstream/main into fork/main
   # Checkout develop, merge main into develop
-  # Auto-review config diffs (Dockerfile, nginx.conf)
+  # Auto-review config diffs (Dockerfile, Caddyfile.http)
   # Clean containers, test build
 }
 
@@ -513,7 +516,7 @@ trap "rm -f $LOCKFILE" EXIT
 ```markdown
 # Use backticks for:
 Command names: `docker compose up`
-Variable names: `GOCLAW_PORT`
+Variable names: `GOCLAW_HTTP_PORT`
 File paths: `.env.example`
 
 # Use code blocks for:

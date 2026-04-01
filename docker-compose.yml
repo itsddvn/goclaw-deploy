@@ -3,18 +3,22 @@
 # Usage:
 #   docker compose up -d
 #
-# Dashboard: http://localhost:3000
-# API:       http://localhost:3000/v1/
+# Dashboard: http://localhost (or https://<domain> if GOCLAW_DOMAIN is set)
+# API:       http://localhost/v1/
 # pgAdmin:   http://localhost:5050
 
 services:
   goclaw:
-    image: itsddvn/goclaw:v2.47.2
+    image: itsddvn/goclaw:v2.50.0
     volumes:
       - goclaw-data:/app/data
       - goclaw-workspace:/app/workspace
+      - caddy-data:/data
+      - ./Caddyfile:/app/Caddyfile:ro
+      - ${GOCLAW_SKILLS_STORE:-/opt/goclaw/data/skills-store}:/app/data/skills-store
     ports:
-      - "${GOCLAW_PORT:-3000}:18790"
+      - "${GOCLAW_HTTP_PORT:-80}:8080"
+      - "${GOCLAW_HTTPS_PORT:-443}:8443"
     env_file:
       - path: .env
         required: false
@@ -23,6 +27,7 @@ services:
       GOCLAW_MODE: managed
       GOCLAW_SKILLS_DIR: /app/data/skills
       GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      GOCLAW_DOMAIN: ${GOCLAW_DOMAIN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,5 +84,6 @@ services:
 volumes:
   goclaw-data:
   goclaw-workspace:
+  caddy-data:
   pgdata:
   pgadmin-data:

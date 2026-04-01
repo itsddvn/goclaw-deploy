@@ -4,7 +4,7 @@ set -euo pipefail
 # ── Config ──────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_DIR="$SCRIPT_DIR"
-CORE_DIR="$(dirname "$DEPLOY_DIR")/goclaw-core"
+CORE_DIR="$DEPLOY_DIR/goclaw-core"
 IMAGE="itsddvn/goclaw"
 HEALTH_RETRIES=30
 HEALTH_INTERVAL=5
@@ -234,7 +234,7 @@ do_sync() {
   # ── AUTO-REVIEW ──────────────────────────────────────────────────────
   header "REVIEW — Auto-sync deploy configs from upstream"
 
-  DEPLOY_CONFIGS="Dockerfile nginx.conf"
+  DEPLOY_CONFIGS="nginx.conf"
   SYNCED=0
 
   for cfg in $DEPLOY_CONFIGS; do
@@ -299,8 +299,11 @@ do_sync() {
   header "TEST — Build from source & health check"
 
   COMPOSE_RUNNING="$COMPOSE_BUILD"
-  info "Building and starting with $COMPOSE_BUILD..."
-  docker compose -f "$DEPLOY_DIR/$COMPOSE_BUILD" up -d --build
+  info "Building core + all-in-one image..."
+  make -C "$DEPLOY_DIR" build-local
+
+  info "Starting with $COMPOSE_BUILD..."
+  docker compose -f "$DEPLOY_DIR/$COMPOSE_BUILD" up -d
 
   health_check "http://localhost:3000/health" 60 5
 
@@ -376,17 +379,8 @@ do_publish() {
 
   confirm "Push ${IMAGE}:${VERSION} to Docker Hub?"
 
-  info "Building image..."
-  if ! docker buildx build \
-    --platform linux/amd64 \
-    --build-context deploy="$DEPLOY_DIR" \
-    --build-context web="$CORE_DIR/ui/web" \
-    -f "$DEPLOY_DIR/Dockerfile" \
-    --build-arg VERSION="$VERSION" \
-    -t "$IMAGE:$VERSION" \
-    -t "$IMAGE:latest" \
-    --push \
-    "$CORE_DIR"; then
+  info "Building and pushing image..."
+  if ! VERSION="$VERSION" make -C "$DEPLOY_DIR" push; then
     error "Docker build or push failed"
     error "Check credentials: docker login"
     exit 1

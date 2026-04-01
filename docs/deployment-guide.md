@@ -8,7 +8,7 @@ Step-by-step instructions for deploying GoClaw using all three compose variants.
 - Docker & Docker Compose v2+
 - 2GB+ RAM available
 - 2GB+ disk space for image and volumes
-- Port 3000 (or custom GOCLAW_PORT) available
+- Port 80 (or custom GOCLAW_HTTP_PORT) available
 - PostgreSQL runs internally (no external port needed)
 
 ### Software Versions
@@ -78,8 +78,8 @@ openssl rand -hex 32
 **Optional configurations:**
 
 ```env
-# Change port (default: 3000)
-GOCLAW_PORT=8000
+# Change HTTP port (default: 80)
+GOCLAW_HTTP_PORT=8000
 
 # Add additional LLM providers
 GOCLAW_OPENAI_API_KEY=sk-...
@@ -166,7 +166,7 @@ Wait for STATUS to show "healthy" (takes ~10s):
 docker compose ps --no-trunc
 
 # Or poll health endpoint
-curl http://localhost:3000/health
+curl http://localhost/health
 ```
 
 Expected response:
@@ -176,7 +176,7 @@ Expected response:
 
 #### Step 4: Access Dashboard
 
-Open in browser: **http://localhost:3000**
+Open in browser: **http://localhost**
 
 You should see GoClaw web interface.
 
@@ -184,9 +184,9 @@ You should see GoClaw web interface.
 
 **Port already in use:**
 ```bash
-lsof -i :3000
+lsof -i :80
 # Kill process or use different port:
-GOCLAW_PORT=8000 docker compose up -d
+GOCLAW_HTTP_PORT=8000 docker compose up -d
 ```
 
 **Image pull fails:**
@@ -213,7 +213,7 @@ docker compose logs postgres --tail=20
 
 **Use case:** Test changes to code, modify Dockerfile/config, don't push to Docker Hub.
 
-**Prerequisites:** `../goclaw-core` sibling directory with source code.
+**Prerequisites:** `./goclaw-core` git submodule with source code.
 
 **Time to ready:** ~90 seconds (includes build)
 
@@ -229,18 +229,16 @@ docker compose -f docker-compose-build.yml up -d --build
 
 ```bash
 # Check that goclaw-core exists
-ls -la ../goclaw-core/go.mod
-ls -la ../goclaw-core/ui/web/package.json
-ls -la ../goclaw-core/migrations/
+ls -la ./goclaw-core/go.mod
+ls -la ./goclaw-core/ui/web/package.json
+ls -la ./goclaw-core/migrations/
 
 # All should exist
 ```
 
 If missing:
 ```bash
-cd ..
-git clone https://github.com/nextlevelbuilder/goclaw.git goclaw-core
-cd goclaw-deploy
+git submodule update --init --recursive
 ```
 
 #### Step 2: Build Image
@@ -270,19 +268,19 @@ Console output:
 docker compose -f docker-compose-build.yml ps
 
 # When healthy:
-curl http://localhost:3000/health
+curl http://localhost/health
 ```
 
 #### Step 4: Access Dashboard
 
-Open: **http://localhost:3000**
+Open: **http://localhost**
 
 ### Development Workflow
 
 **Make changes to goclaw-core source:**
 
 ```bash
-cd ../goclaw-core
+cd ./goclaw-core
 # Edit files, commit
 git add .
 git commit -m "..."
@@ -469,7 +467,7 @@ Release workflow (release.sh):
 # Workflow:
 # 1. Checkout main in goclaw-core, fetch upstream, merge upstream/main
 # 2. Checkout develop, merge main into develop
-# 3. Auto-review config diffs (Dockerfile, nginx.conf)
+# 3. Auto-review config diffs (Dockerfile, Caddyfile.http)
 # 4. Clean containers, test build
 # 5. Build multi-arch (linux/amd64), push to Docker Hub
 # 6. Update docker-compose.yml and docker-compose-dokploy.yml
@@ -487,7 +485,7 @@ docker compose up -d
 
 ```bash
 # Pull latest source
-cd ../goclaw-core
+cd ./goclaw-core
 git pull origin main
 
 # Rebuild container
@@ -671,10 +669,10 @@ docker stats --no-stream
 
 ```bash
 # Check health
-curl http://localhost:3000/health
+curl http://localhost/health
 
 # Pretty print
-curl http://localhost:3000/health | jq .
+curl http://localhost/health | jq .
 
 # Expected:
 {
@@ -711,20 +709,20 @@ curl http://localhost:3000/health | jq .
 
 1. **Use firewall**
    ```bash
-   # On host, block port 3000 from external
-   ufw allow from 10.0.0.0/8 to any port 3000  # Local network only
-   ufw deny from any to any port 3000           # External blocked
+   # On host, block port 80/443 from external if needed
+   ufw allow from 10.0.0.0/8 to any port 80   # Local network only
+   ufw deny from any to any port 80            # External blocked
    ```
 
 2. **Reverse proxy with authentication (Nginx, Caddy, etc.)**
    ```
-   External → Nginx (auth required) → goclaw:3000
+   External → Nginx (auth required) → goclaw:80
    ```
 
 3. **Use HTTPS in production**
-   - Deploy behind reverse proxy (nginx, Dokploy, etc.)
-   - Use SSL/TLS termination
-   - Never expose on HTTP
+   - Set `GOCLAW_DOMAIN` to enable Caddy's built-in auto HTTPS (Let's Encrypt)
+   - Or deploy behind reverse proxy (Dokploy, etc.) for SSL termination
+   - Never expose sensitive data over plain HTTP in production
 
 ### Regular Updates
 
@@ -738,6 +736,50 @@ git pull
 docker compose pull
 docker compose up -d
 ```
+
+---
+
+## Auto HTTPS with Caddy
+
+GoClaw uses Caddy as its built-in reverse proxy. When `GOCLAW_DOMAIN` is set, Caddy automatically obtains and renews a TLS certificate via Let's Encrypt — no manual certificate management needed.
+
+### Enable Auto HTTPS
+
+Add to your `.env`:
+
+```env
+# Set your public domain to enable auto HTTPS
+GOCLAW_DOMAIN=goclaw.example.com
+```
+
+Then restart:
+
+```bash
+docker compose up -d
+```
+
+Caddy will:
+1. Obtain a certificate from Let's Encrypt on first startup
+2. Serve HTTPS on port 443 (`GOCLAW_HTTPS_PORT`, default `443`)
+3. Redirect HTTP (port 80) to HTTPS automatically
+
+### Port Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOCLAW_HTTP_PORT` | `80` | Host port for HTTP traffic |
+| `GOCLAW_HTTPS_PORT` | `443` | Host port for HTTPS traffic (auto HTTPS only) |
+| `GOCLAW_DOMAIN` | *(unset)* | Domain name; enables auto HTTPS when set |
+
+### Without Auto HTTPS (HTTP Only)
+
+Leave `GOCLAW_DOMAIN` unset (default). Caddy serves HTTP only on port 80. Suitable for local use or when sitting behind an external SSL-terminating proxy (e.g., Dokploy, Nginx, Cloudflare).
+
+### Requirements for Auto HTTPS
+
+- Port 80 and 443 must be reachable from the internet (for ACME HTTP-01 challenge)
+- DNS A/AAAA record for `GOCLAW_DOMAIN` must point to your server
+- No firewall blocking inbound port 443
 
 ---
 
@@ -807,14 +849,14 @@ Use this before deploying to production:
 
 - [ ] Docker and Docker Compose installed and updated
 - [ ] System has 2GB+ free RAM and disk
-- [ ] Required ports (3000, 5432) available
+- [ ] Required ports (80, 443) available
 - [ ] .env file created and configured
 - [ ] LLM API key added to .env
 - [ ] GOCLAW_GATEWAY_TOKEN and GOCLAW_ENCRYPTION_KEY generated
 - [ ] POSTGRES_PASSWORD set to strong value
 - [ ] docker compose config passes validation
 - [ ] Containers start without errors
-- [ ] Health check passes (curl http://localhost:3000/health)
+- [ ] Health check passes (curl http://localhost/health)
 - [ ] Dashboard accessible in browser
 - [ ] Can log in and create/use agents
 - [ ] Backup strategy in place (if production)

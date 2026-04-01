@@ -1,0 +1,3 @@
+[submodule "goclaw-core"]
+	path = goclaw-core
+	url = https://github.com/nextlevelbuilder/goclaw.git

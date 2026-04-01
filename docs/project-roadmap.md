@@ -17,7 +17,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 - Multi-architecture support (amd64, arm64)
 - Database integration (PostgreSQL 18 + pgvector)
 - Container security hardening
-- nginx reverse proxy with WebSocket support
+- Caddy reverse proxy with WebSocket support and auto HTTPS
 - Comprehensive README and deployment documentation
 
 ### Completed (Q1 2026)
@@ -62,7 +62,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 
 **Deliverables:**
 - Troubleshooting FAQ (20+ common issues)
-- Advanced configuration guide (custom nginx, environment overrides)
+- Advanced configuration guide (custom Caddy config, environment overrides)
 - Monitoring & alerting setup (Prometheus, Grafana examples)
 - Multi-region deployment patterns
 - Performance tuning guide
@@ -80,7 +80,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 **Status:** ✓ Complete (March 2026)
 - release.sh with sync + publish workflow
 - Upstream merge conflict detection
-- Config auto-review (Dockerfile, nginx.conf)
+- Config auto-review (Dockerfile, Caddyfile.http)
 - Health check automation
 - Multi-arch build support (linux/amd64)
 
@@ -160,7 +160,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 - Profile goclaw container (CPU, memory)
 - Optimize Docker image layer caching
 - pnpm module optimization (tree-shaking)
-- nginx caching strategies
+- Caddy caching strategies
 - Database query optimization
 - Connection pooling setup (pgBouncer)
 
@@ -245,7 +245,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 
 - Multi-stage Dockerfile with cross-platform support
 - Three Docker Compose variants (prod, dev, dokploy)
-- nginx reverse proxy with API/WebSocket routing
+- Caddy reverse proxy with API/WebSocket routing and auto HTTPS
 - entrypoint.sh with graceful shutdown
 - Security hardening (non-root, CAP_DROP, tmpfs protections)
 
@@ -254,7 +254,7 @@ Provide a production-grade, containerized packaging of GoClaw that enables seaml
 
 - release.sh with sync + publish workflow
 - Upstream merge conflict detection
-- Config auto-review (Dockerfile, nginx.conf)
+- Config auto-review (Dockerfile, Caddyfile.http)
 - Health check automation
 - Makefile build targets
 

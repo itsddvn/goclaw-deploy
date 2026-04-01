@@ -28,13 +28,13 @@ Provide a production-ready, containerized packaging of GoClaw that enables fast 
 
 ### Automated Release Workflow
 - Sync upstream (`goclaw-core`) with conflict detection
-- Auto-review config changes (Dockerfile, nginx.conf)
+- Auto-review config changes (Dockerfile, Caddyfile.http)
 - Multi-arch build (linux/amd64, linux/arm64)
 - Smoke test post-push before marking release complete
 
 ### Integrated Backend + Frontend
-- Go backend (port 18790 internally, proxied by nginx)
-- React SPA served from nginx (port 8080)
+- Go backend (port 18790 internally, proxied by Caddy)
+- React SPA served from Caddy (port 8080 HTTP / 8443 HTTPS)
 - WebSocket support for real-time agent updates
 - API routing at /v1/
 
@@ -57,7 +57,7 @@ Provide a production-ready, containerized packaging of GoClaw that enables fast 
 | ID | Requirement | Status |
 |---|---|---|
 | FR-1 | Build multi-stage Docker image from goclaw-core source | Complete |
-| FR-2 | Serve React SPA and API via nginx reverse proxy | Complete |
+| FR-2 | Serve React SPA and API via Caddy reverse proxy | Complete |
 | FR-3 | Support PostgreSQL 18 with pgvector in managed mode | Complete |
 | FR-4 | Provide three compose variants (prod, dev, dokploy) | Complete |
 | FR-5 | Auto-migrate database on container startup | Complete |
@@ -111,7 +111,7 @@ Provide a production-ready, containerized packaging of GoClaw that enables fast 
 
 ### Decision: Named Build Context for Deploy Configs
 **Rationale:** Avoid including deploy repo in Docker build context; keep separation of concerns.
-**Impact:** Dockerfile can reference `../goclaw-core` as build context while importing configs from deploy repo.
+**Impact:** Dockerfile can reference `./goclaw-core` as build context while importing configs from deploy repo.
 
 ### Decision: Three Compose Variants
 **Rationale:** Support different deployment scenarios without duplicating service definitions.
@@ -128,7 +128,7 @@ Provide a production-ready, containerized packaging of GoClaw that enables fast 
 ## Technical Constraints
 
 ### Upstream Dependency
-- **goclaw-core** repo (sibling directory ../goclaw-core)
+- **goclaw-core** is included as a git submodule at ./goclaw-core
 - Requires main + develop branches
 - Must have upstream remote configured
 - Uses git tags for versioning
@@ -176,7 +176,7 @@ Provide a production-ready, containerized packaging of GoClaw that enables fast 
 - Impact: Deployment fails with parsing error
 - Mitigation: release.sh smoke test catches before commit
 
-**Risk: nginx Config Reload Failure**
+**Risk: Caddy Config or Process Failure**
 - Impact: Reverse proxy unavailable
 - Mitigation: Container healthcheck from start-period ensures full readiness
 
@@ -207,7 +207,7 @@ When breaking changes occur:
 - Multi-stage Dockerfile ✓
 - Docker Compose setup ✓
 - entrypoint.sh lifecycle management ✓
-- nginx reverse proxy ✓
+- Caddy reverse proxy ✓
 
 ### Phase 2: Automation (Complete)
 - release.sh sync workflow ✓
@@ -237,7 +237,7 @@ When breaking changes occur:
 cp .env.example .env
 # Edit .env with API keys, passwords
 docker compose up -d
-curl http://localhost:3000/health
+curl http://localhost/health
 ```
 
 ### Releasing a New Version
@@ -258,7 +258,7 @@ docker compose up -d
 ```bash
 docker compose ps
 docker compose logs goclaw -f
-curl http://localhost:3000/health | jq
+curl http://localhost/health | jq
 ```
 
 ## Future Roadmap

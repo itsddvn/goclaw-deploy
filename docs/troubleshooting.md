@@ -8,23 +8,23 @@ Common issues, error messages, and solutions.
 
 **Error:**
 ```
-Error response from daemon: Bind for 0.0.0.0:3000 failed: port is already allocated
+Error response from daemon: Bind for 0.0.0.0:80 failed: port is already allocated
 ```
 
-**Cause:** Another process or container is using port 3000.
+**Cause:** Another process or container is using port 80.
 
 **Solution:**
 
 Option 1: Use different port
 ```bash
-GOCLAW_PORT=8000 docker compose up -d
+GOCLAW_HTTP_PORT=8000 docker compose up -d
 # Access at http://localhost:8000
 ```
 
 Option 2: Find and stop conflicting process
 ```bash
-# Find what's using port 3000
-lsof -i :3000
+# Find what's using port 80
+lsof -i :80
 # Output: COMMAND  PID  ... (app name and PID)
 
 # Kill the process
@@ -213,7 +213,7 @@ grep -E "GOCLAW_.*_API_KEY" .env | grep -v "^#"
 docker compose ps
 # STATUS: Up (unhealthy)
 
-curl http://localhost:3000/health
+curl http://localhost/health
 # Connection refused or timeout
 ```
 
@@ -247,12 +247,12 @@ docker compose logs goclaw | tail -20
 Manual health check:
 ```bash
 # Test API directly
-curl -v http://localhost:3000/health
+curl -v http://localhost/health
 
 # If timeout, container may not be fully started
 # Wait and retry
 sleep 10
-curl http://localhost:3000/health
+curl http://localhost/health
 ```
 
 ---
@@ -369,8 +369,8 @@ docker compose exec postgres psql \
 
 Check migration files:
 ```bash
-# In goclaw-core repo
-ls ../goclaw-core/migrations/
+# In the ./goclaw-core submodule
+ls ./goclaw-core/migrations/
 # Should contain SQL files (001_, 002_, etc.)
 
 # Verify they're in image
@@ -392,7 +392,7 @@ docker compose up -d
 
 **Error:**
 ```
-Browser: localhost:3000 - Cannot reach server / Connection refused
+Browser: localhost - Cannot reach server / Connection refused
 ```
 
 **Cause:**
@@ -410,24 +410,24 @@ docker compose ps
 
 Test port:
 ```bash
-curl http://localhost:3000
+curl http://localhost
 # If timeout, port not exposed
 
 # Check if listening
-netstat -tlnp | grep 3000
-# (or: lsof -i :3000)
+netstat -tlnp | grep ':80 '
+# (or: lsof -i :80)
 ```
 
 Check Docker compose port mapping:
 ```bash
 docker compose ps
-# Under "PORTS" column, should see: 0.0.0.0:3000->8080/tcp
+# Under "PORTS" column, should see: 0.0.0.0:80->8080/tcp
 ```
 
 Firewall/VPN issue:
 ```bash
 # Try localhost
-curl http://127.0.0.1:3000
+curl http://127.0.0.1
 
 # If localhost works but 192.168.*.* doesn't,
 # firewall or VPN may be blocking
@@ -437,7 +437,7 @@ Restart and try:
 ```bash
 docker compose restart
 sleep 5
-curl http://localhost:3000/health
+curl http://localhost/health
 ```
 
 ---
@@ -446,31 +446,28 @@ curl http://localhost:3000/health
 
 **Error:**
 ```
-Browser console: WebSocket connection to 'ws://localhost:3000/ws' failed
+Browser console: WebSocket connection to 'ws://localhost/ws' failed
 ```
 
 **Cause:** WebSocket proxy misconfigured.
 
 **Solution:**
 
-Check nginx configuration:
+Check Caddy configuration:
 ```bash
-docker compose exec goclaw cat /etc/nginx/http.d/default.conf | grep -A 10 "location /ws"
-# Should include:
-#   proxy_http_version 1.1;
-#   proxy_set_header Upgrade $http_upgrade;
-#   proxy_set_header Connection "upgrade";
+docker compose exec goclaw cat /tmp/Caddyfile
+# Should include a reverse_proxy directive routing /ws to 127.0.0.1:18790
 ```
 
 Test WebSocket:
 ```bash
 # Install websocat if needed
-# websocat ws://localhost:3000/ws
+# websocat ws://localhost/ws
 # or use curl
 curl -i -N -H "Connection: Upgrade" \
   -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" \
-  http://localhost:3000/ws
+  http://localhost/ws
 ```
 
 Check backend readiness:
@@ -485,7 +482,7 @@ docker compose logs goclaw | tail -20
 
 **Error:**
 ```
-curl http://localhost:3000/v1/...
+curl http://localhost/v1/...
 # 502 Bad Gateway
 ```
 
@@ -508,16 +505,16 @@ Check backend logs:
 docker compose logs goclaw --tail=50 | grep -i error
 ```
 
-Check nginx logs:
+Check Caddy logs (Caddy logs to stderr, captured by Docker):
 ```bash
-docker compose exec goclaw cat /var/log/nginx/error.log | tail -20
+docker compose logs goclaw | grep -i caddy
 ```
 
 Restart services:
 ```bash
 docker compose restart
 sleep 5
-curl http://localhost:3000/v1/health
+curl http://localhost/v1/health
 ```
 
 ---
@@ -663,8 +660,8 @@ Check in running container:
 ```bash
 docker compose exec goclaw sh
 # Inside:
-echo $GOCLAW_PORT  # Shows value or empty
-env | grep GOCLAW  # Lists all GOCLAW_* vars
+echo $GOCLAW_HTTP_PORT  # Shows value or empty
+env | grep GOCLAW       # Lists all GOCLAW_* vars
 ```
 
 ---
@@ -721,7 +718,7 @@ docker compose restart goclaw
 
 **Error:**
 ```
-curl http://localhost:3000/v1/...
+curl http://localhost/v1/...
 # Takes > 5 seconds
 ```
 
@@ -735,7 +732,7 @@ curl http://localhost:3000/v1/...
 
 Check network latency:
 ```bash
-time curl http://localhost:3000/health
+time curl http://localhost/health
 # Compare "real" time (total) vs "user"+"sys" (processing)
 ```
 
@@ -814,12 +811,10 @@ error building context: ...
 
 Check build context:
 ```bash
-# Verify goclaw-core exists
-ls -la ../goclaw-core/
-# Should have: go.mod, ui/web/, migrations/
-
-# If missing, clone
-git clone https://github.com/nextlevelbuilder/goclaw.git ../goclaw-core
+# Verify ./goclaw-core submodule exists
+ls -la ./goclaw-core/
+# If missing, initialize submodule
+git submodule update --init --recursive
 ```
 
 Check Dockerfile:
@@ -854,13 +849,13 @@ error building context: /src: ...
 
 **Solution:**
 
-Check goclaw-core source:
+Check ./goclaw-core source:
 ```bash
-ls ../goclaw-core/*.go
+ls ./goclaw-core/*.go
 # Should have main.go and other files
-
-cd ../goclaw-core
+cd ./goclaw-core
 git log -1  # Check if repo valid
+```
 ```
 
 Check Go version:
@@ -872,8 +867,8 @@ cat Dockerfile | grep "golang:"
 
 Build errors in code:
 ```bash
-# Check goclaw-core for syntax errors
-cd ../goclaw-core
+# Check ./goclaw-core for syntax errors
+cd ./goclaw-core
 go build
 # This shows compilation issues
 ```
@@ -893,16 +888,17 @@ error building context: ui/web build failed
 
 Check web source:
 ```bash
-ls -la ../goclaw-core/ui/web/
+ls -la ./goclaw-core/ui/web/
 # Should have: package.json, pnpm-lock.yaml
 ```
 
 Build locally:
 ```bash
-cd ../goclaw-core/ui/web
+cd ./goclaw-core/ui/web
 pnpm install
 pnpm build
 # Shows actual error messages
+```
 ```
 
 Check pnpm version:
@@ -969,7 +965,7 @@ docker compose up -d
 
 echo "Waiting for health..."
 for i in {1..60}; do
-  curl -s http://localhost:3000/health && \
+  curl -s http://localhost/health && \
     { echo "Services healthy!"; exit 0; } || sleep 1
 done
 

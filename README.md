@@ -1,109 +1,143 @@
 # GoClaw Deploy
 
-All-in-one Docker deployment for GoClaw — an AI agent gateway platform. This repo packages the upstream `goclaw-core` into a containerized setup with nginx reverse proxy, PostgreSQL database, and pgvector extension.
+All-in-one Docker deployment for [GoClaw](https://github.com/nextlevelbuilder/goclaw) — an AI agent gateway platform with a React web dashboard, multi-LLM support, and chat channel integrations.
 
-## What is GoClaw?
+## Version
 
-GoClaw is a Go-based AI agent gateway with a React web dashboard. It supports multiple LLM providers (OpenAI, Anthropic, Gemini, Deepseek, etc.), chat channels (Telegram, Discord, Lark, Zalo), and vector storage.
+| Component | Version | Source |
+|---|---|---|
+| **goclaw-core** | `v2.50.0` | Git submodule → `./goclaw-core` |
+| **Docker image** | `itsddvn/goclaw:v2.50.0` | Pre-built on Docker Hub |
+| **PostgreSQL** | 18 + pgvector | `pgvector/pgvector:pg18` |
+
+> The `goclaw-core` submodule is pinned to a specific tag. To upgrade, see [Upgrading](#upgrading) below.
 
 ## Quick Start
 
-### Prerequisites
-- Docker & Docker Compose
-- At least one LLM provider API key (OpenAI, Anthropic, Gemini, etc.)
+### 1. Clone (with submodule)
 
-### 1. Configure Environment
+```bash
+git clone --recurse-submodules git@github.com:vutadev/goclaw-deploy.git
+cd goclaw-deploy
+```
+
+If you already cloned without `--recurse-submodules`:
+
+```bash
+git submodule update --init --recursive
+```
+
+### 2. Configure Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and add:
-- At least one LLM provider key (e.g., `GOCLAW_ANTHROPIC_API_KEY`)
-- Random values for `GOCLAW_GATEWAY_TOKEN` and `GOCLAW_ENCRYPTION_KEY`
-- PostgreSQL password: `POSTGRES_PASSWORD`
+Edit `.env` and set:
 
-### 2. Start the Service
+| Variable | Required | Description |
+|---|---|---|
+| `GOCLAW_ANTHROPIC_API_KEY` | At least one LLM key | Anthropic (Claude) |
+| `GOCLAW_OPENAI_API_KEY` | | OpenAI |
+| `GOCLAW_GEMINI_API_KEY` | | Google Gemini |
+| `GOCLAW_DEEPSEEK_API_KEY` | | DeepSeek |
+| `GOCLAW_OPENROUTER_API_KEY` | | OpenRouter (multi-provider) |
+| `GOCLAW_GATEWAY_TOKEN` | Yes | Random token (`openssl rand -hex 32`) |
+| `GOCLAW_ENCRYPTION_KEY` | Yes | Random key (`openssl rand -hex 32`) |
+| `POSTGRES_PASSWORD` | Yes | Database password |
 
-**Production (pre-built image from Docker Hub):**
+### 3. Start
+
+**Production (pre-built image):**
+
 ```bash
 docker compose up -d
 ```
 
-**Local build (from source):**
+**Local build (from submodule source):**
+
 ```bash
 docker compose -f docker-compose-build.yml up -d --build
 ```
 
-**Dokploy deployment (external network):**
+**Dokploy PaaS:**
+
 ```bash
 docker compose -f docker-compose-dokploy.yml up -d
 ```
 
-### 3. Access Dashboard
+### 4. Access
 
-Open http://localhost:3000 in your browser.
+| Service | URL |
+|---|---|
+| Dashboard | http://localhost |
+| API | http://localhost/v1/ |
+| pgAdmin | http://localhost:5050 |
 
 ## Compose Variants
 
-| Compose File | Use Case | Build | Image Source |
-|---|---|---|---|
-| `docker-compose.yml` | Production | Fast (no build) | Docker Hub (`itsddvn/goclaw`) |
-| `docker-compose-build.yml` | Development | From source | Local Dockerfile |
-| `docker-compose-dokploy.yml` | Dokploy PaaS | Pre-built | Docker Hub (external network) |
+| File | Use Case | Image Source |
+|---|---|---|
+| `docker-compose.yml` | Production | Docker Hub `itsddvn/goclaw:v2.50.0` |
+| `docker-compose-build.yml` | Development / local build | Built from `./goclaw-core` submodule |
+| `docker-compose-dokploy.yml` | Dokploy PaaS | Docker Hub (external network) |
 
-All variants use PostgreSQL 18 with pgvector extension for vector storage (internal only, not exposed externally).
+All variants include PostgreSQL 18 + pgvector (internal, not exposed) and pgAdmin.
 
-## Architecture
+## Upgrading
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Container (Alpine Linux)                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  nginx (port 8080)                              │   │
-│  │  - Reverse proxy for /v1/ (API)                 │   │
-│  │  - WebSocket proxy for /ws                      │   │
-│  │  - SPA static files (React build)               │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  GoClaw backend (port 18790)                    │   │
-│  │  - Go binary with migrations                    │   │
-│  │  - Auto-upgrade on startup (managed mode)       │   │
-│  │  - Runs as goclaw user via su-exec              │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  pkg-helper (Unix socket /tmp/pkg.sock)         │   │
-│  │  - Root-privileged package installer            │   │
-│  │  - Handles apk installs for skills on-demand    │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  Full skills pre-installed                      │   │
-│  │  - Python + pip packages (pandas, anthropic...) │   │
-│  │  - Node.js + npm packages (docx, pptxgenjs)    │   │
-│  │  - pandoc, github-cli, poppler-utils, bash      │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-           ↓ (port 3000 mapped)
-┌─────────────────────────────────────────────────────────┐
-│  PostgreSQL 18 + pgvector                               │
-│  - Vector database for embeddings                       │
-│  - User, config, skills storage                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Release Workflow
-
-Automated release process via `release.sh`:
+### Update goclaw-core to a new tag
 
 ```bash
-./release.sh sync       # Sync upstream → merge main & develop
+# See available tags
+cd goclaw-core && git fetch --tags && git tag --sort=-v:refname | head -10
+
+# Pin to a specific version
+git checkout v2.51.0
+cd ..
+
+# Update compose files to match
+# Edit docker-compose.yml and docker-compose-dokploy.yml:
+#   image: itsddvn/goclaw:<new-version>
+
+# Commit the submodule pin + compose changes
+git add goclaw-core docker-compose.yml docker-compose-dokploy.yml
+git commit -m "chore: upgrade goclaw-core to v2.51.0"
+```
+
+### Automated release (build + push)
+
+```bash
+./release.sh sync       # Sync upstream, merge changes
 ./release.sh publish    # Tag, build, push to Docker Hub, smoke test
 ./release.sh full       # sync + publish (default)
+```
+
+## Building
+
+### Using Make
+
+```bash
+make build-local              # Build for current platform
+make push                     # Build multi-arch + push to Docker Hub
+make version                  # Show version from submodule git tag
+```
+
+### Using Docker directly
+
+```bash
+docker buildx build \
+  --build-context deploy=. \
+  --build-arg VERSION=v2.50.0 \
+  -f Dockerfile \
+  -t itsddvn/goclaw:v2.50.0 \
+  ./goclaw-core
 ```
 
 ## Environment Variables
 
 ### LLM Providers (at least one required)
+
 ```
 GOCLAW_OPENROUTER_API_KEY=
 GOCLAW_ANTHROPIC_API_KEY=
@@ -119,12 +153,14 @@ GOCLAW_MINIMAX_API_KEY=
 ```
 
 ### Gateway Security (required)
+
 ```
-GOCLAW_GATEWAY_TOKEN=             # Random token for external access
-GOCLAW_ENCRYPTION_KEY=            # Random encryption key
+GOCLAW_GATEWAY_TOKEN=             # openssl rand -hex 32
+GOCLAW_ENCRYPTION_KEY=            # openssl rand -hex 32
 ```
 
 ### Channels (optional)
+
 ```
 GOCLAW_TELEGRAM_TOKEN=
 GOCLAW_DISCORD_TOKEN=
@@ -133,80 +169,117 @@ GOCLAW_LARK_APP_SECRET=
 GOCLAW_ZALO_TOKEN=
 ```
 
-### Database (managed mode)
+### Database
+
 ```
 POSTGRES_USER=goclaw             # Default
-POSTGRES_PASSWORD=               # Required, set in .env
+POSTGRES_PASSWORD=               # Required
 POSTGRES_DB=goclaw               # Default
 ```
 
 ### Ports
+
 ```
-GOCLAW_PORT=3000                 # External port (maps to 8080 in container)
-GOCLAW_BACKEND_PORT=18790        # Backend port (build mode only)
+GOCLAW_HTTP_PORT=80              # HTTP host port (maps to container port 8080)
+GOCLAW_HTTPS_PORT=443            # HTTPS host port (maps to container port 8443, requires GOCLAW_DOMAIN)
+GOCLAW_DOMAIN=                   # Set to enable auto HTTPS via Caddy (e.g. goclaw.example.com)
 ```
 
-## Troubleshooting
+## Architecture
 
-### Health check failed
 ```
-docker compose logs goclaw --tail=50
-```
-Common causes:
-- Database not ready: Check `postgres` health in `docker compose ps`
-- Migration failed: Check logs for SQL errors
-- Port conflict: `lsof -i :3000` (check if port 3000 is in use)
-
-### Containers won't start
-```
-docker compose down -v
-docker compose up -d
-```
-
-### Database needs reset
-```
-docker compose down -v  # Remove all volumes
-docker compose up -d    # Fresh start
-```
-
-### Build errors
-For local build variant:
-```bash
-# Ensure goclaw-core exists
-ls -la ../goclaw-core
-
-# Rebuild (clears build cache)
-docker compose -f docker-compose-build.yml up -d --build --no-cache
+┌─────────────────────────────────────────────────────────┐
+│  Container (Alpine Linux)                               │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  Caddy (port 8080 HTTP / 8443 HTTPS)            │   │
+│  │  - Reverse proxy for API and WebSocket          │   │
+│  │  - Serves React SPA static files               │   │
+│  │  - Auto HTTPS via Let's Encrypt (GOCLAW_DOMAIN) │   │
+│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  GoClaw backend (port 18790)                    │   │
+│  │  - Go binary with auto-migrations              │   │
+│  │  - Serves API (/v1/) + WebSocket (/ws) + SPA   │   │
+│  │  - Runs as goclaw user via su-exec              │   │
+│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  pkg-helper (Unix socket /tmp/pkg.sock)         │   │
+│  │  - Root-privileged package installer            │   │
+│  │  - Handles apk installs for skills on-demand    │   │
+│  └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+           ↓ (port 80 → 8080, port 443 → 8443)
+┌─────────────────────────────────────────────────────────┐
+│  PostgreSQL 18 + pgvector                               │
+│  - Vector database for embeddings                       │
+│  - User, config, skills storage                         │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## File Structure
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | 3-stage: Go build → React build → Alpine runtime (full skills) |
-| `entrypoint.sh` | Startup: pkg-helper, su-exec privilege drop, auto-migrate, goclaw + nginx |
-| `nginx.conf` | Reverse proxy: /v1/ API, /ws WebSocket, SPA static, security headers |
-| `nginx-main.conf` | Main nginx config with tmpfs writable paths |
-| `docker-compose.yml` | Production: uses pre-built image |
-| `docker-compose-build.yml` | Development: builds from source |
+| `goclaw-core/` | Upstream source (git submodule, pinned to `v2.50.0`) |
+| `Dockerfile` | Multi-stage build: Go binary → Alpine runtime |
+| `docker-entrypoint.sh` | Startup: permission fixes, pkg-helper, su-exec privilege drop |
+| `docker-compose.yml` | Production: pre-built image |
+| `docker-compose-build.yml` | Development: builds from submodule source |
 | `docker-compose-dokploy.yml` | Dokploy: external network config |
-| `release.sh` | Automated release workflow |
+| `Makefile` | Multi-arch build/push targets |
+| `release.sh` | Automated release: sync, build, push, smoke test |
+| `.env.example` | Environment variable template |
 
 ## Security
 
-- Entrypoint runs as root only for package persistence and pkg-helper, then drops to `goclaw` user via `su-exec`
-- `no-new-privileges` security option enabled
-- All capabilities dropped except `SETUID`, `SETGID`, `CHOWN` (required for su-exec privilege drop)
+- Runs as non-root `goclaw` user via `su-exec`
+- `no-new-privileges` security option
+- All capabilities dropped except `SETUID`, `SETGID`, `CHOWN` (required for su-exec)
 - `init: true` for proper signal handling and zombie reaping
 - `/tmp` mounted noexec for exploit prevention
 - Resource limits: 1GB RAM, 2 CPU, 200 PIDs
-- Request body limit: 10MB for LLM chat payloads
-- Security headers: X-Content-Type-Options, X-Frame-Options, Referrer-Policy
-- GZIP compression enabled
-- Static asset caching (1 year, immutable)
+
+## Troubleshooting
+
+### Health check failed
+
+```bash
+docker compose logs goclaw --tail=50
+```
+
+Common causes:
+- Database not ready: Check `docker compose ps` for postgres health
+- Migration failed: Check logs for SQL errors
+- Port conflict: `lsof -i :80`
+
+### Submodule is empty
+
+```bash
+git submodule update --init --recursive
+```
+
+### Containers won't start
+
+```bash
+docker compose down -v    # Remove volumes
+docker compose up -d      # Fresh start
+```
+
+### Build errors (local build)
+
+```bash
+# Verify submodule is checked out
+ls ./goclaw-core/main.go
+
+# Check pinned version
+cd goclaw-core && git describe --tags
+cd ..
+
+# Rebuild without cache
+docker compose -f docker-compose-build.yml up -d --build --no-cache
+```
 
 ## Support
 
-For issues with goclaw-core, see https://github.com/nextlevelbuilder/goclaw
-
-For deployment issues, check the docs/ directory for detailed guides.
+- GoClaw core: https://github.com/nextlevelbuilder/goclaw
+- Deployment guides: see `docs/` directory

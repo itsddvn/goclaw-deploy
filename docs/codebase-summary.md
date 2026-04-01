@@ -11,7 +11,7 @@ Complete breakdown of the goclaw-deploy repository structure, file purposes, and
 **Key Technologies:**
 - Docker & Docker Compose (container orchestration)
 - Dockerfile (3-stage multi-arch build)
-- nginx (reverse proxy & SPA server)
+- Caddy (reverse proxy & SPA server, auto HTTPS)
 - PostgreSQL 18 + pgvector (vector database)
 - Go 1.25 (backend binary compilation)
 - Node 22 + pnpm (React SPA build)
@@ -28,7 +28,7 @@ Multi-stage container build orchestrating Go binary compilation, React SPA build
 **Stages:**
 1. **go-builder** (`golang:1.25-bookworm`): Compiles Go binary with cross-compilation support (TARGETARCH), strips binaries, embeds VERSION
 2. **web-builder** (`node:22-alpine`): Installs pnpm, builds React SPA from `ui/web/` source
-3. **runtime** (`alpine:3.22`): Alpine OS + nginx, copies compiled binary and SPA, runs as non-root
+3. **runtime** (`alpine:3.22`): Alpine OS + Caddy, copies compiled binary and SPA, runs as non-root
 
 **Key Features:**
 - Cross-platform support via BUILDPLATFORM/TARGETARCH
@@ -39,48 +39,51 @@ Multi-stage container build orchestrating Go binary compilation, React SPA build
 - Healthcheck via wget on /health
 - Security: CAP_DROP ALL, tmpfs /tmp with noexec/nosuid
 
-**Exposed Ports:** 8080 (nginx)
+**Exposed Ports:** 8080 (Caddy HTTP), 8443 (Caddy HTTPS)
 
-#### entrypoint.sh (55 LOC)
-Container startup script handling process lifecycle and mode-specific initialization.
+#### entrypoint.sh (86 LOC)
+Container startup script handling volume permissions, Caddyfile selection, and process lifecycle.
 
 **Modes:**
-- `serve` (default): Auto-upgrade on startup (if GOCLAW_MODE=managed), daemonizes goclaw & nginx, graceful shutdown trap
-- `upgrade`: Runs `goclaw upgrade` (schema migrations + data hooks)
-- `migrate`: Runs `goclaw migrate` (database migrations)
-- `onboard`: Runs `goclaw onboard` (interactive setup)
-- `version`: Prints version info
-- `*`: Pass-through to goclaw binary
+- `serve` (default): Fix volume ownership, select Caddyfile (HTTP or HTTPS based on GOCLAW_DOMAIN), delegate to core entrypoint for shared init, start Caddy, graceful shutdown trap
+- `*`: Delegate to core entrypoint (`/app/docker-entrypoint.sh`)
 
 **Critical Logic:**
 ```bash
-if [ "$GOCLAW_MODE" = "managed" ] && [ -n "$GOCLAW_POSTGRES_DSN" ]; then
-    /app/goclaw upgrade  # Auto-migrate before serving
+# Caddyfile selection based on GOCLAW_DOMAIN
+if [ -n "$GOCLAW_DOMAIN" ]; then
+    envsubst '$GOCLAW_DOMAIN' < /app/Caddyfile.https > /tmp/Caddyfile
+else
+    cp /app/Caddyfile.http /tmp/Caddyfile
 fi
 ```
 
-**Process Management:** Runs goclaw & nginx as background processes, kills both on SIGTERM/SIGINT.
+**Process Management:** Runs goclaw (via core entrypoint) & Caddy as background processes, kills both on SIGTERM/SIGINT.
 
-#### nginx.conf (57 LOC)
-Reverse proxy configuration serving React SPA and proxying API requests.
+#### nginx.conf — REMOVED
+Replaced by `Caddyfile.http` and `Caddyfile.https`. See below.
+
+#### Caddyfile.http (37 LOC)
+HTTP-only Caddy reverse proxy configuration. Used when `GOCLAW_DOMAIN` is unset (default).
 
 **Key Routes:**
 | Location | Target | Purpose |
 |---|---|---|
-| `/assets/` | Static files | Cache 1 year, immutable (Vite hashed names) |
-| `/ws` | http://127.0.0.1:18790 | WebSocket proxy with Upgrade headers, 86400s timeout |
-| `/v1/` | http://127.0.0.1:18790 | API proxy with X-Real-IP/X-Forwarded-For |
+| `/v1/*` | http://127.0.0.1:18790 | API reverse proxy |
+| `/ws` | http://127.0.0.1:18790 | WebSocket proxy with 86400s read timeout |
 | `/health` | http://127.0.0.1:18790 | Health check proxy |
-| `/` (SPA fallback) | /index.html | Try files, fall back to index.html |
+| `/assets/*` | Static files | Cache 1 year, immutable (Vite hashed names) |
+| `/` (SPA fallback) | /index.html | try_files, fall back to index.html |
 
-**Security Headers:**
-- X-Content-Type-Options: nosniff
-- X-Frame-Options: SAMEORIGIN
-- Referrer-Policy: strict-origin-when-cross-origin
+**Security Headers:** X-Content-Type-Options, X-Frame-Options, Referrer-Policy
 
-**Performance:**
-- Gzip compression (min 256 bytes)
-- Client max body size: 10MB (for LLM chat payloads)
+#### Caddyfile.https (43 LOC)
+Auto HTTPS Caddy configuration using `${GOCLAW_DOMAIN}` placeholder (rendered via `envsubst`). Used when `GOCLAW_DOMAIN` is set.
+
+Same routing as Caddyfile.http, plus:
+- `http_port 8080`, `https_port 8443` (high ports for no-new-privileges)
+- `storage file_system /data` (certificate persistence via caddy-data volume)
+- Auto HTTPS via Let's Encrypt (ACME HTTP-01 challenge)
 
 ### Docker Compose Files
 
@@ -88,11 +91,11 @@ Reverse proxy configuration serving React SPA and proxying API requests.
 Production composition: uses pre-built image from Docker Hub, no build step.
 
 **Services:**
-- **goclaw**: image `itsddvn/goclaw:v0.4.0-12-g231e112` (pinned version)
+- **goclaw**: image `itsddvn/goclaw:v2.50.0` (pinned version)
   - Managed mode with PostgreSQL DSN
-  - 5 named volumes: data, workspace, skills, sessions, .goclaw dotdir
-  - Port mapping: GOCLAW_PORT (default 3000) → 8080
-  - Security: no-new-privileges, CAP_DROP ALL, tmpfs /tmp
+  - 3 named volumes: data, workspace, caddy-data
+  - Port mapping: GOCLAW_HTTP_PORT (default 80) → 8080, GOCLAW_HTTPS_PORT (default 443) → 8443
+  - Security: no-new-privileges, CAP_DROP ALL (except SETUID/SETGID/CHOWN), tmpfs /tmp
   - Resources: 1GB RAM, 2 CPU, 200 PIDs limit
   - Health check dependency on postgres
 
@@ -110,14 +113,14 @@ Production composition: uses pre-built image from Docker Hub, no build step.
 Development composition: builds from source, useful for testing changes.
 
 **Differences from docker-compose.yml:**
-- `build:` instead of `image:` — builds Dockerfile from ../goclaw-core context
+- `build:` instead of `image:` — builds Dockerfile from ./goclaw-core context
 - Dockerfile from $(PWD)/Dockerfile (deploy repo)
 - Additional contexts: deploy=. (enables COPY --from=deploy)
 - Platform: linux/amd64 (explicit, no multi-arch)
 - GOCLAW_VERSION build arg (default: dev)
 - Otherwise identical to production (volumes, security, resources)
 
-**Prerequisites:** Requires ../goclaw-core sibling directory with go.mod, ui/web/, migrations/.
+**Prerequisites:** Requires the goclaw-core git submodule at ./goclaw-core with go.mod, ui/web/, migrations/.
 
 #### docker-compose-dokploy.yml (71 LOC)
 Dokploy PaaS deployment with external network.
@@ -140,7 +143,7 @@ Fully automated release workflow: sync upstream, review configs, build, push, sm
 - `./release.sh full` — sync + publish (default)
 
 **Preflight Checks:**
-- goclaw-core exists at ../goclaw-core
+- goclaw-core git submodule is initialized at ./goclaw-core
 - Upstream remote configured in goclaw-core
 - Docker and docker buildx available
 - Lock file (prevents concurrent runs)
@@ -150,7 +153,7 @@ Fully automated release workflow: sync upstream, review configs, build, push, sm
 *Sync phase:*
 1. Checkout main, fetch upstream, merge upstream/main
 2. Checkout develop, merge main into develop
-3. Auto-review: diff deploy configs (Dockerfile, nginx.conf) vs core
+3. Auto-review: diff deploy configs (Dockerfile, Caddyfile.http) vs core
 4. Clean: stop containers, remove volumes
 5. Test build: docker-compose-build.yml up, health check
 
@@ -177,7 +180,7 @@ Template for environment variables (copy to .env before running).
 2. **Gateway** (2 keys) — GOCLAW_GATEWAY_TOKEN, GOCLAW_ENCRYPTION_KEY (generate random values)
 3. **Channels** (5 keys) — Telegram, Discord, Lark, Zalo integrations (optional)
 4. **Database** (1 key) — POSTGRES_PASSWORD (managed mode only)
-5. **Ports** (1 key, commented) — GOCLAW_UI_PORT (optional, default 3000)
+5. **Ports** (3 keys, commented) — GOCLAW_HTTP_PORT (default 80), GOCLAW_HTTPS_PORT (default 443), GOCLAW_DOMAIN (optional, enables auto HTTPS)
 
 #### .gitignore (3 items)
 Ignores:
@@ -200,31 +203,32 @@ Copyright 2026 Duc Nguyen.
 Separates concerns:
 1. **Go compilation** — Heavy toolchain, discarded
 2. **React bundling** — Build tools removed, output only
-3. **Runtime** — Minimal Alpine with only binary + SPA + nginx
+3. **Runtime** — Minimal Alpine with only binary + SPA + Caddy
 
-Result: ~500MB final image (Alpine 3.22 base ~7MB + GoClaw ~150MB + nginx ~20MB + React SPA ~100MB).
+Result: ~500MB final image (Alpine 3.22 base ~7MB + GoClaw ~150MB + Caddy ~40MB + React SPA ~100MB).
 
 ### Named Docker Build Context
 Allows copying deploy repo files into image without including entire deploy repo in Docker build context:
 ```dockerfile
-COPY --from=deploy nginx.conf /etc/nginx/http.d/default.conf
-COPY --from=deploy entrypoint.sh /app/entrypoint.sh
+COPY Caddyfile.http Caddyfile.https /app/
+COPY entrypoint.sh /app/entrypoint.sh
 ```
 
 Build command:
 ```bash
-docker buildx build --build-context deploy=. -f Dockerfile -t image:tag ../goclaw-core
+docker buildx build --build-context deploy=. -f Dockerfile -t image:tag ./goclaw-core
 ```
 
 ### Managed Mode + Auto-Migration
-Detects environment and auto-upgrades schema on startup:
+Core entrypoint detects environment and auto-upgrades schema on startup:
 ```bash
-if [ "$GOCLAW_MODE" = "managed" ] && [ -n "$GOCLAW_POSTGRES_DSN" ]; then
-    /app/goclaw upgrade
-fi
+# Core docker-entrypoint.sh handles:
+# - Runtime directory setup
+# - Database migration (goclaw upgrade)
+# - su-exec privilege drop
 ```
 
-Enables zero-downtime deployments: pull new image → container starts → auto-migrates → serves requests.
+Deploy entrypoint delegates to core for shared init, then manages Caddy alongside:
 
 ### Compose Variants for Different Scenarios
 Single Dockerfile, three compositions:
@@ -290,10 +294,11 @@ goclaw binary reads all GOCLAW_* vars
 - Resource limits (prevent DoS)
 
 ### Network
-- nginx security headers (XSS, clickjacking prevention)
+- Caddy security headers (XSS, clickjacking prevention)
 - Reverse proxy (API backend not directly exposed)
-- WebSocket proxying (long-lived connections)
-- Client max body size limit (10MB)
+- WebSocket proxying (long-lived connections with 86400s read timeout)
+- Request body max size limit (50MB)
+- Auto HTTPS via Let's Encrypt when GOCLAW_DOMAIN is set
 
 ### Data
 - PostgreSQL credentials from .env (git-ignored)
@@ -314,7 +319,7 @@ git push
 ### Local Development Build
 ```bash
 docker compose -f docker-compose-build.yml up -d --build
-# Edits to ../goclaw-core reflect on rebuild
+# Edits to ./goclaw-core reflect on rebuild
 ```
 
 ### Reset Database
@@ -333,6 +338,6 @@ docker compose logs postgres -f
 ### Inspect Health
 ```bash
 docker compose ps
-curl http://localhost:3000/health
+curl http://localhost/health
 docker exec -it <container> /app/goclaw version
 ```
