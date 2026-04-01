@@ -66,7 +66,7 @@ Steps:
 2. Copy source (.)
 3. Cross-compile: CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH
 4. Strip debug symbols (-s -w flags)
-5. Embed version via ldflags (-X github.com/nextlevelbuilder/goclaw/cmd.Version=...)
+5. Embed version via ldflags (-X github.com/itsddvn/goclaw/cmd.Version=...)
 ```
 
 **Why BUILDPLATFORM/TARGETARCH?**

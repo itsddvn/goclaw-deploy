@@ -1,6 +1,6 @@
 # GoClaw Deploy
 
-All-in-one Docker deployment for [GoClaw](https://github.com/nextlevelbuilder/goclaw) — an AI agent gateway platform with a React web dashboard, multi-LLM support, and chat channel integrations.
+All-in-one Docker deployment for [GoClaw](https://github.com/itsddvn/goclaw) — an AI agent gateway platform with a React web dashboard, multi-LLM support, and chat channel integrations.
 
 ## Version
 
@@ -17,7 +17,7 @@ All-in-one Docker deployment for [GoClaw](https://github.com/nextlevelbuilder/go
 ### 1. Clone (with submodule)
 
 ```bash
-git clone --recurse-submodules git@github.com:vutadev/goclaw-deploy.git
+git clone --recurse-submodules git@github.com:itsddvn/goclaw-deploy.git
 cd goclaw-deploy
 ```
 
@@ -177,12 +177,40 @@ POSTGRES_PASSWORD=               # Required
 POSTGRES_DB=goclaw               # Default
 ```
 
+### Skills Store (optional)
+
+```
+GOCLAW_SKILLS_STORE=/opt/goclaw/data/skills-store   # Host path for skills persistence
+```
+
 ### Ports
 
 ```
 GOCLAW_HTTP_PORT=80              # HTTP host port (maps to container port 8080)
 GOCLAW_HTTPS_PORT=443            # HTTPS host port (maps to container port 8443, requires GOCLAW_DOMAIN)
 GOCLAW_DOMAIN=                   # Set to enable auto HTTPS via Caddy (e.g. goclaw.example.com)
+```
+
+### pgAdmin (optional)
+
+```
+PGADMIN_EMAIL=admin@admin.com    # pgAdmin login email
+PGADMIN_PASSWORD=admin           # pgAdmin login password
+PGADMIN_PORT=5050                # pgAdmin host port
+```
+
+### Dokploy Mode (docker-compose-dokploy.yml only)
+
+```
+GOCLAW_DATA_VOLUME=goclaw-data             # Named volume for data
+GOCLAW_WORKSPACE_VOLUME=goclaw-workspace   # Named volume for workspace
+```
+
+### Build Mode (docker-compose-build.yml only)
+
+```
+GOCLAW_IMAGE=itsddvn/goclaw     # Override image name
+GOCLAW_VERSION=latest            # Override image tag
 ```
 
 ## Architecture
@@ -222,7 +250,8 @@ GOCLAW_DOMAIN=                   # Set to enable auto HTTPS via Caddy (e.g. gocl
 |---|---|
 | `goclaw-core/` | Upstream source (git submodule, pinned to `v2.50.0`) |
 | `Dockerfile` | Multi-stage build: Go binary → Alpine runtime |
-| `docker-entrypoint.sh` | Startup: permission fixes, pkg-helper, su-exec privilege drop |
+| `Caddyfile` | Caddy reverse proxy config (HTTP/HTTPS, SPA, WebSocket) |
+| `entrypoint.sh` | Startup: permission fixes, pkg-helper, su-exec privilege drop |
 | `docker-compose.yml` | Production: pre-built image |
 | `docker-compose-build.yml` | Development: builds from submodule source |
 | `docker-compose-dokploy.yml` | Dokploy: external network config |
@@ -281,5 +310,5 @@ docker compose -f docker-compose-build.yml up -d --build --no-cache
 
 ## Support
 
-- GoClaw core: https://github.com/nextlevelbuilder/goclaw
+- GoClaw core: https://github.com/itsddvn/goclaw
 - Deployment guides: see `docs/` directory

@@ -990,8 +990,8 @@ If issues persist:
    ```
 
 3. **GitHub Issues:**
-   - goclaw-deploy: https://github.com/nextlevelbuilder/goclaw-deploy/issues
-   - goclaw-core: https://github.com/nextlevelbuilder/goclaw/issues
+   - goclaw-deploy: https://github.com/itsddvn/goclaw-deploy/issues
+   - goclaw-core: https://github.com/itsddvn/goclaw/issues
 
 4. **Debugging:**
    ```bash
