@@ -16,7 +16,8 @@
 # pgAdmin:   http://localhost:5050
 
 services:
-  goclaw:
+  goclaw-stack-core:
+    container_name: goclaw-stack-core
     image: itsddvn/goclaw:v2.56.6
     volumes:
       - goclaw-data:/app/data
@@ -33,14 +34,14 @@ services:
       # ── Internal (do not change) ──
       GOCLAW_CONFIG: /app/data/config.json
       GOCLAW_SKILLS_DIR: /app/data/skills
-      GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@${POSTGRES_HOST:-goclaw-stack-postgres}:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
       # ── Gateway (required — generate with: openssl rand -hex 32) ──
       GOCLAW_GATEWAY_TOKEN: ${GOCLAW_GATEWAY_TOKEN:-}
       GOCLAW_ENCRYPTION_KEY: ${GOCLAW_ENCRYPTION_KEY:-}
       # ── Domain & HTTPS (optional — leave empty for HTTP only) ──
       GOCLAW_DOMAIN: ${GOCLAW_DOMAIN:-}
     depends_on:
-      postgres:
+      goclaw-stack-postgres:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
@@ -59,10 +60,14 @@ services:
           memory: 1G
           cpus: '2.0'
           pids: 200
+    networks:
+      - goclaw-internal
+      - goclaw-external
     restart: unless-stopped
 
-  postgres:
+  goclaw-stack-postgres:
     image: pgvector/pgvector:pg18
+    container_name: goclaw-stack-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-goclaw}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goclaw}
@@ -74,9 +79,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - goclaw-internal
     restart: unless-stopped
 
   pgadmin:
+    container_name: goclaw-stack-pgadmin
     image: dpage/pgadmin4:latest
     ports:
       - "${PGADMIN_PORT:-5050}:80"
@@ -88,9 +96,19 @@ services:
     volumes:
       - pgadmin-data:/var/lib/pgadmin
     depends_on:
-      postgres:
+      goclaw-stack-postgres:
         condition: service_healthy
+    networks:
+      - goclaw-internal
+      - goclaw-external
     restart: unless-stopped
+
+networks:
+  goclaw-internal:
+    driver: bridge
+    internal: true
+  goclaw-external:
+    driver: bridge
 
 volumes:
   goclaw-data:
