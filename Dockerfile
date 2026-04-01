@@ -41,7 +41,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # caddy listens on 8080 (HTTP) and 8443 (HTTPS), goclaw on 18790 (internal)
-EXPOSE 8080 8443
+EXPOSE 8080 8443 18790
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://localhost:8080/health || exit 1

@@ -143,8 +143,8 @@ docker buildx build \
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GOCLAW_GATEWAY_TOKEN` | Yes | — | Security token (generate: `openssl rand -hex 32`) |
-| `GOCLAW_ENCRYPTION_KEY` | Yes | — | Encryption key (generate: `openssl rand -hex 32`) |
-| `POSTGRES_PASSWORD` | Yes | `goclaw` | PostgreSQL password |
+| `GOCLAW_ENCRYPTION_KEY` | Yes | — | Encryption key (generate: `openssl rand -hex 32`). **Must be preserved** when migrating or re-deploying — changing it will make existing encrypted data unreadable. |
+| `POSTGRES_PASSWORD` | Yes | `goclaw` | PostgreSQL password. **Must match the original value** when migrating or re-deploying against an existing database. |
 | `POSTGRES_USER` | No | `goclaw` | PostgreSQL username |
 | `POSTGRES_DB` | No | `goclaw` | PostgreSQL database name |
 | `GOCLAW_DOMAIN` | No | — | Domain for auto HTTPS via Let's Encrypt |

@@ -769,6 +769,7 @@ Caddy will:
 |---|---|---|
 | `GOCLAW_HTTP_PORT` | `80` | Host port for HTTP traffic |
 | `GOCLAW_HTTPS_PORT` | `443` | Host port for HTTPS traffic (auto HTTPS only) |
+| `GOCLAW_API_PORT` | `18790` | Host port for direct API access (bypasses Caddy) |
 | `GOCLAW_DOMAIN` | *(unset)* | Domain name; enables auto HTTPS when set |
 
 ### Without Auto HTTPS (HTTP Only)

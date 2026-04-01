@@ -491,11 +491,11 @@ Host OS
 
 ### Network Isolation
 ```
-Container network only exposes port 8080 (HTTP) and 8443 (HTTPS)
+Container network exposes port 8080 (HTTP), 8443 (HTTPS), and 18790 (API direct)
     ↓
-Host port 80 / 443 (docker compose mapping)
+Host port 80 / 443 / 18790 (docker compose mapping)
     ↓
-All internal services (goclaw:18790) only accessible from localhost/docker network
+API port 18790 is optionally exposed for direct access (bypassing Caddy)
     ↓
 Database (postgres:5432) only accessible from container via docker network
     (NOT exposed externally on any port)

@@ -12,7 +12,7 @@
 # Generate gateway secrets: openssl rand -hex 32
 #
 # Dashboard: http://localhost (or https://<domain> if GOCLAW_DOMAIN is set)
-# API:       http://localhost/v1/
+# API:       http://localhost/v1/ (via Caddy) or http://localhost:18790 (direct)
 # pgAdmin:   http://localhost:5050
 
 services:
@@ -27,6 +27,7 @@ services:
     ports:
       - "${GOCLAW_HTTP_PORT:-80}:8080"
       - "${GOCLAW_HTTPS_PORT:-443}:8443"
+      - "${GOCLAW_API_PORT:-18790}:18790"
     env_file:
       - path: .env
         required: false
