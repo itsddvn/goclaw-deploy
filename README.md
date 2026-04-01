@@ -14,22 +14,26 @@ All-in-one Docker deployment for [GoClaw](https://github.com/itsddvn/goclaw) —
 
 ## Quick Start
 
-### 1. Clone (with submodule)
+### Option A: Standalone (no clone needed)
+
+Download just `docker-compose.yml`, edit the gateway tokens, and start:
+
+```bash
+# Generate gateway secrets
+openssl rand -hex 32  # → GOCLAW_GATEWAY_TOKEN
+openssl rand -hex 32  # → GOCLAW_ENCRYPTION_KEY
+
+# Edit environment variables in docker-compose.yml, then:
+docker compose up -d
+```
+
+LLM provider keys and channels can be configured via the web dashboard after startup.
+
+### Option B: Clone (for local builds or customization)
 
 ```bash
 git clone --recurse-submodules git@github.com:itsddvn/goclaw-deploy.git
 cd goclaw-deploy
-```
-
-If you already cloned without `--recurse-submodules`:
-
-```bash
-git submodule update --init --recursive
-```
-
-### 2. Configure Environment
-
-```bash
 cp .env.example .env
 ```
 
@@ -37,16 +41,17 @@ Edit `.env` and set:
 
 | Variable | Required | Description |
 |---|---|---|
-| `GOCLAW_ANTHROPIC_API_KEY` | At least one LLM key | Anthropic (Claude) |
-| `GOCLAW_OPENAI_API_KEY` | | OpenAI |
-| `GOCLAW_GEMINI_API_KEY` | | Google Gemini |
-| `GOCLAW_DEEPSEEK_API_KEY` | | DeepSeek |
-| `GOCLAW_OPENROUTER_API_KEY` | | OpenRouter (multi-provider) |
 | `GOCLAW_GATEWAY_TOKEN` | Yes | Random token (`openssl rand -hex 32`) |
 | `GOCLAW_ENCRYPTION_KEY` | Yes | Random key (`openssl rand -hex 32`) |
 | `POSTGRES_PASSWORD` | Yes | Database password |
 
-### 3. Start
+If you already cloned without `--recurse-submodules`:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Start
 
 **Production (pre-built image):**
 
@@ -133,82 +138,26 @@ docker buildx build \
 
 ## Environment Variables
 
-### LLM Providers (at least one required)
+> LLM provider keys and channel integrations are configured via the web dashboard.
 
-```
-GOCLAW_OPENROUTER_API_KEY=
-GOCLAW_ANTHROPIC_API_KEY=
-GOCLAW_OPENAI_API_KEY=
-GOCLAW_GEMINI_API_KEY=
-GOCLAW_DEEPSEEK_API_KEY=
-GOCLAW_GROQ_API_KEY=
-GOCLAW_MISTRAL_API_KEY=
-GOCLAW_XAI_API_KEY=
-GOCLAW_COHERE_API_KEY=
-GOCLAW_PERPLEXITY_API_KEY=
-GOCLAW_MINIMAX_API_KEY=
-```
-
-### Gateway Security (required)
-
-```
-GOCLAW_GATEWAY_TOKEN=             # openssl rand -hex 32
-GOCLAW_ENCRYPTION_KEY=            # openssl rand -hex 32
-```
-
-### Channels (optional)
-
-```
-GOCLAW_TELEGRAM_TOKEN=
-GOCLAW_DISCORD_TOKEN=
-GOCLAW_LARK_APP_ID=
-GOCLAW_LARK_APP_SECRET=
-GOCLAW_ZALO_TOKEN=
-```
-
-### Database
-
-```
-POSTGRES_USER=goclaw             # Default
-POSTGRES_PASSWORD=               # Required
-POSTGRES_DB=goclaw               # Default
-```
-
-### Skills Store (optional)
-
-```
-GOCLAW_SKILLS_STORE=/opt/goclaw/data/skills-store   # Host path for skills persistence
-```
-
-### Ports
-
-```
-GOCLAW_HTTP_PORT=80              # HTTP host port (maps to container port 8080)
-GOCLAW_HTTPS_PORT=443            # HTTPS host port (maps to container port 8443, requires GOCLAW_DOMAIN)
-GOCLAW_DOMAIN=                   # Set to enable auto HTTPS via Caddy (e.g. goclaw.example.com)
-```
-
-### pgAdmin (optional)
-
-```
-PGADMIN_EMAIL=admin@admin.com    # pgAdmin login email
-PGADMIN_PASSWORD=admin           # pgAdmin login password
-PGADMIN_PORT=5050                # pgAdmin host port
-```
-
-### Dokploy Mode (docker-compose-dokploy.yml only)
-
-```
-GOCLAW_DATA_VOLUME=goclaw-data             # Named volume for data
-GOCLAW_WORKSPACE_VOLUME=goclaw-workspace   # Named volume for workspace
-```
-
-### Build Mode (docker-compose-build.yml only)
-
-```
-GOCLAW_IMAGE=itsddvn/goclaw     # Override image name
-GOCLAW_VERSION=latest            # Override image tag
-```
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GOCLAW_GATEWAY_TOKEN` | Yes | — | Security token (generate: `openssl rand -hex 32`) |
+| `GOCLAW_ENCRYPTION_KEY` | Yes | — | Encryption key (generate: `openssl rand -hex 32`) |
+| `POSTGRES_PASSWORD` | Yes | `goclaw` | PostgreSQL password |
+| `POSTGRES_USER` | No | `goclaw` | PostgreSQL username |
+| `POSTGRES_DB` | No | `goclaw` | PostgreSQL database name |
+| `GOCLAW_DOMAIN` | No | — | Domain for auto HTTPS via Let's Encrypt |
+| `GOCLAW_HTTP_PORT` | No | `80` | Host HTTP port (maps to container 8080) |
+| `GOCLAW_HTTPS_PORT` | No | `443` | Host HTTPS port (maps to container 8443, requires `GOCLAW_DOMAIN`) |
+| `GOCLAW_SKILLS_STORE` | No | `/opt/goclaw/data/skills-store` | Host path for skills persistence |
+| `PGADMIN_EMAIL` | No | `admin@admin.com` | pgAdmin login email |
+| `PGADMIN_PASSWORD` | No | `admin` | pgAdmin login password |
+| `PGADMIN_PORT` | No | `5050` | pgAdmin host port |
+| `GOCLAW_DATA_VOLUME` | No | `goclaw-data` | Named volume for data (Dokploy only) |
+| `GOCLAW_WORKSPACE_VOLUME` | No | `goclaw-workspace` | Named volume for workspace (Dokploy only) |
+| `GOCLAW_IMAGE` | No | `itsddvn/goclaw` | Override image name (build mode only) |
+| `GOCLAW_VERSION` | No | `latest` | Override image tag (build mode only) |
 
 ## Architecture
 

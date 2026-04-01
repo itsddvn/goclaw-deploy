@@ -15,10 +15,13 @@ services:
       - path: .env
         required: false
     environment:
+      # ── Internal (do not change) ──
       GOCLAW_CONFIG: /app/data/config.json
-      GOCLAW_MODE: managed
       GOCLAW_SKILLS_DIR: /app/data/skills
       GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      # ── Gateway (required — generate with: openssl rand -hex 32) ──
+      GOCLAW_GATEWAY_TOKEN: ${GOCLAW_GATEWAY_TOKEN:-}
+      GOCLAW_ENCRYPTION_KEY: ${GOCLAW_ENCRYPTION_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

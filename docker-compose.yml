@@ -1,7 +1,15 @@
-# GoClaw All-in-One — Managed mode (PostgreSQL + pgvector + Web Dashboard + pgAdmin)
+# GoClaw All-in-One — PostgreSQL + pgvector + Web Dashboard + pgAdmin
 #
-# Usage:
-#   docker compose up -d
+# Quick start (no .env file needed):
+#   1. Edit the environment variables below (at minimum: GOCLAW_GATEWAY_TOKEN,
+#      GOCLAW_ENCRYPTION_KEY, and one LLM provider API key via dashboard)
+#   2. docker compose up -d
+#
+# Or with .env file:
+#   1. Create .env alongside this file with your variables
+#   2. docker compose up -d
+#
+# Generate gateway secrets: openssl rand -hex 32
 #
 # Dashboard: http://localhost (or https://<domain> if GOCLAW_DOMAIN is set)
 # API:       http://localhost/v1/
@@ -14,7 +22,6 @@ services:
       - goclaw-data:/app/data
       - goclaw-workspace:/app/workspace
       - caddy-data:/data
-      - ./Caddyfile:/app/Caddyfile:ro
       - ${GOCLAW_SKILLS_STORE:-/opt/goclaw/data/skills-store}:/app/data/skills-store
     ports:
       - "${GOCLAW_HTTP_PORT:-80}:8080"
@@ -23,10 +30,14 @@ services:
       - path: .env
         required: false
     environment:
+      # ── Internal (do not change) ──
       GOCLAW_CONFIG: /app/data/config.json
-      GOCLAW_MODE: managed
       GOCLAW_SKILLS_DIR: /app/data/skills
       GOCLAW_POSTGRES_DSN: postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      # ── Gateway (required — generate with: openssl rand -hex 32) ──
+      GOCLAW_GATEWAY_TOKEN: ${GOCLAW_GATEWAY_TOKEN:-}
+      GOCLAW_ENCRYPTION_KEY: ${GOCLAW_ENCRYPTION_KEY:-}
+      # ── Domain & HTTPS (optional — leave empty for HTTP only) ──
       GOCLAW_DOMAIN: ${GOCLAW_DOMAIN:-}
     depends_on:
       postgres:
