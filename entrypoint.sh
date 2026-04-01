@@ -13,14 +13,16 @@ if [ "$(id -u)" = "0" ]; then
     su-exec goclaw mkdir -p /app/workspace/teams 2>/dev/null || mkdir -p /app/workspace/teams 2>/dev/null || true
   fi
 
-  # Check if goclaw can write, if not use chmod g+w
+  # Fix ownership if workspace was created by an older image with a different UID
   if ! su-exec goclaw test -w /app/workspace/teams 2>/dev/null; then
-    echo "Note: Fixing permissions for /app/workspace/teams"
+    echo "Note: Fixing ownership for /app/workspace/teams"
+    chown -R goclaw:goclaw /app/workspace/teams 2>/dev/null || true
     chmod -R g+w /app/workspace/teams 2>/dev/null || true
     chmod g+s /app/workspace/teams 2>/dev/null || true  # SetGID for new files
   fi
 
-  # Ensure readable/executable by all
+  # Ensure workspace root is accessible
+  chown goclaw:goclaw /app/workspace 2>/dev/null || true
   chmod 755 /app/workspace 2>/dev/null || true
 
   # Data volume — goclaw owns root and direct children (except .runtime)
