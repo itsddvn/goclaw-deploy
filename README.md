@@ -6,8 +6,8 @@ All-in-one Docker deployment for [GoClaw](https://github.com/itsddvn/goclaw) —
 
 | Component | Version | Source |
 |---|---|---|
-| **goclaw-core** | `v2.50.0` | Git submodule → `./goclaw-core` |
-| **Docker image** | `itsddvn/goclaw:v2.50.0` | Pre-built on Docker Hub |
+| **goclaw-core** | `v2.56.6` | Git submodule → `./goclaw-core` |
+| **Docker image** | `itsddvn/goclaw:v2.56.6` | Pre-built on Docker Hub |
 | **PostgreSQL** | 18 + pgvector | `pgvector/pgvector:pg18` |
 
 > The `goclaw-core` submodule is pinned to a specific tag. To upgrade, see [Upgrading](#upgrading) below.
@@ -78,7 +78,7 @@ docker compose -f docker-compose-dokploy.yml up -d
 
 | File | Use Case | Image Source |
 |---|---|---|
-| `docker-compose.yml` | Production | Docker Hub `itsddvn/goclaw:v2.50.0` |
+| `docker-compose.yml` | Production | Docker Hub `itsddvn/goclaw:v2.56.6` |
 | `docker-compose-build.yml` | Development / local build | Built from `./goclaw-core` submodule |
 | `docker-compose-dokploy.yml` | Dokploy PaaS | Docker Hub (external network) |
 
@@ -89,20 +89,15 @@ All variants include PostgreSQL 18 + pgvector (internal, not exposed) and pgAdmi
 ### Update goclaw-core to a new tag
 
 ```bash
-# See available tags
-cd goclaw-core && git fetch --tags && git tag --sort=-v:refname | head -10
+# Update to latest tag (fetches tags and checks out the newest vX.Y.Z)
+make update
 
-# Pin to a specific version
-git checkout v2.51.0
-cd ..
-
-# Update compose files to match
-# Edit docker-compose.yml and docker-compose-dokploy.yml:
-#   image: itsddvn/goclaw:<new-version>
+# Or pin to a specific version
+make update TAG=v2.56.6
 
 # Commit the submodule pin + compose changes
 git add goclaw-core docker-compose.yml docker-compose-dokploy.yml
-git commit -m "chore: upgrade goclaw-core to v2.51.0"
+git commit -m "chore: upgrade goclaw-core to v2.56.6"
 ```
 
 ### Automated release (build + push)
@@ -121,6 +116,8 @@ git commit -m "chore: upgrade goclaw-core to v2.51.0"
 make build-local              # Build for current platform
 make push                     # Build multi-arch + push to Docker Hub
 make version                  # Show version from submodule git tag
+make update                   # Update submodule to latest tag
+make update TAG=v2.56.6       # Update submodule to specific tag
 ```
 
 ### Using Docker directly
@@ -128,9 +125,9 @@ make version                  # Show version from submodule git tag
 ```bash
 docker buildx build \
   --build-context deploy=. \
-  --build-arg VERSION=v2.50.0 \
+  --build-arg VERSION=v2.56.6 \
   -f Dockerfile \
-  -t itsddvn/goclaw:v2.50.0 \
+  -t itsddvn/goclaw:v2.56.6 \
   ./goclaw-core
 ```
 
@@ -248,7 +245,7 @@ GOCLAW_VERSION=latest            # Override image tag
 
 | File | Purpose |
 |---|---|
-| `goclaw-core/` | Upstream source (git submodule, pinned to `v2.50.0`) |
+| `goclaw-core/` | Upstream source (git submodule, pinned to `v2.56.6`) |
 | `Dockerfile` | Multi-stage build: Go binary → Alpine runtime |
 | `Caddyfile` | Caddy reverse proxy config (HTTP/HTTPS, SPA, WebSocket) |
 | `entrypoint.sh` | Startup: permission fixes, pkg-helper, su-exec privilege drop |

@@ -91,22 +91,23 @@ all: push
 version:
 	@echo $(VERSION)
 
-# Checkout goclaw-core at a specific tag and update compose files
-# Usage: make update TAG=v2.50.0
+# Update goclaw-core submodule
+# Usage: make update          — pull latest tag
+#        make update TAG=v2.50.0 — checkout specific tag
 update:
-ifndef TAG
-	$(error TAG is required. Usage: make update TAG=v2.50.0)
-endif
-	@echo "Checking out goclaw-core at $(TAG)..."
-	cd $(GOCLAW_DIR) && git fetch --tags && git checkout $(TAG)
-	@echo "Updating compose files to $(IMAGE):$(TAG)..."
+	@cd $(GOCLAW_DIR) && git fetch --tags
+	$(eval RESOLVED_TAG := $(if $(TAG),$(TAG),$(shell cd $(GOCLAW_DIR) && git tag --sort=-v:refname --list 'v[0-9]*' | head -n1)))
+	@if [ -z "$(RESOLVED_TAG)" ]; then echo "Error: no tags found in $(GOCLAW_DIR)"; exit 1; fi
+	@echo "Checking out goclaw-core at $(RESOLVED_TAG)..."
+	cd $(GOCLAW_DIR) && git checkout $(RESOLVED_TAG)
+	@echo "Updating compose files to $(IMAGE):$(RESOLVED_TAG)..."
 	@for f in $(COMPOSE_PROD) $(COMPOSE_DOKPLOY); do \
 		if [ -f "$$f" ]; then \
-			sed -i 's|image: $(IMAGE):[^ ]*|image: $(IMAGE):$(TAG)|' "$$f"; \
+			sed -i 's|image: $(IMAGE):[^ ]*|image: $(IMAGE):$(RESOLVED_TAG)|' "$$f"; \
 			echo "  Updated $$f"; \
 		fi; \
 	done
-	@echo "Done. goclaw-core=$(TAG), compose files updated."
+	@echo "Done. goclaw-core=$(RESOLVED_TAG), compose files updated."
 	@echo "Next: make build-local  (or: make push)"
 
 # Remove local images
