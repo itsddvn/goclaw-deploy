@@ -17,7 +17,7 @@
 
 services:
   goclaw-stack-core:
-    container_name: goclaw-stack-core
+    #container_name: goclaw-stack-core
     image: itsddvn/goclaw:v2.58.3
     volumes:
       - goclaw-data:/app/data
@@ -68,7 +68,7 @@ services:
 
   goclaw-stack-postgres:
     image: pgvector/pgvector:pg18
-    container_name: goclaw-stack-postgres
+    #container_name: goclaw-stack-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-goclaw}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goclaw}
@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
 
   pgadmin:
-    container_name: goclaw-stack-pgadmin
+    #container_name: goclaw-stack-pgadmin
     image: dpage/pgadmin4:latest
     ports:
       - "${PGADMIN_PORT:-5050}:80"
