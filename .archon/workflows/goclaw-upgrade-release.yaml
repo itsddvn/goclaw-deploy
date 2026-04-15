@@ -1,0 +1,181 @@
+name: goclaw-upgrade-release
+description: >
+  Bump goclaw-core submodule to the latest upstream tag, build the Docker image
+  locally, validate the running stack through a browser smoke test, then publish
+  (push multi-arch image + commit submodule/compose bumps + create and push a
+  matching version tag) if the smoke test passes. Safe to re-run — exits early
+  when no newer tag is available.
+
+provider: claude
+model: sonnet
+
+nodes:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 0. Guardrail — refuse to run on a dirty working tree (avoid clobbering
+  #    in-progress edits when `make update` rewrites compose files).
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: guard-clean-worktree
+    bash: |
+      set -eo pipefail
+      DIRTY=$(git status --porcelain)
+      if [ -n "$DIRTY" ]; then
+        echo "ERROR: working tree is not clean. Commit or stash before releasing." >&2
+        echo "$DIRTY" >&2
+        exit 1
+      fi
+      # Submodule must also be clean
+      if ! git diff --quiet --ignore-submodules=none -- goclaw-core; then
+        echo "ERROR: goclaw-core submodule has uncommitted changes." >&2
+        exit 1
+      fi
+      echo "clean"
+    timeout: 30000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. Detect — fetch upstream tags, read current pin, print both.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: detect-version
+    bash: |
+      set -eo pipefail
+      cd goclaw-core
+      git fetch --tags --quiet
+      LATEST_TAG=$(git tag --sort=-v:refname --list 'v[0-9]*' | head -n1)
+      cd ..
+      CURRENT_COMPOSE_TAG=$(grep -oE 'image: itsddvn/goclaw:v[^[:space:]]+' docker-compose.yml \
+        | head -n1 | sed 's/image: itsddvn\/goclaw://')
+      echo "latest_tag=$LATEST_TAG"
+      echo "current_compose_tag=$CURRENT_COMPOSE_TAG"
+    depends_on: [guard-clean-worktree]
+    timeout: 120000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Classify — parse detect-version output into a structured decision.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: classify
+    prompt: |
+      Parse this version check output and decide whether a release is needed.
+
+      Output from detect-version:
+      $detect-version.output
+
+      Rules:
+      - If latest_tag differs from current_compose_tag, status = "update_available"
+      - If they match, status = "up_to_date"
+      - latest_version = the latest_tag value verbatim
+      - current_version = the current_compose_tag value verbatim
+
+      Reply ONLY with the JSON object matching the schema — no prose.
+    depends_on: [detect-version]
+    model: haiku
+    allowed_tools: []
+    output_format:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [update_available, up_to_date]
+        latest_version:
+          type: string
+        current_version:
+          type: string
+      required: [status, latest_version, current_version]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. Update — run `make update` to bump submodule + compose pins.
+  #    Skipped when already up-to-date (cascade skips downstream too).
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: update-submodule
+    bash: |
+      set -eo pipefail
+      echo "=== make update ==="
+      make update 2>&1
+      echo
+      echo "=== compose pin after update ==="
+      grep -E 'image: itsddvn/goclaw:' docker-compose.yml || true
+      grep -E 'image: itsddvn/goclaw:' docker-compose-dokploy.yml 2>/dev/null || true
+    depends_on: [classify]
+    when: "$classify.output.status == 'update_available'"
+    timeout: 300000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. Build — local single-arch build (--load into Docker).
+  #    Tail the last 150 lines so the output fits downstream prompts.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: build-local
+    bash: |
+      set -eo pipefail
+      echo "=== make build-local ==="
+      make build-local 2>&1 | tail -n 150
+      echo
+      echo "=== local images ==="
+      docker image ls itsddvn/goclaw --format '{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}'
+    depends_on: [update-submodule]
+    timeout: 2700000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Smoke test — start the stack in an isolated compose project, run a
+  #    Playwright login flow, tear it down. Returns a pass/fail verdict.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: browser-smoke-test
+    command: browser-smoke-test
+    depends_on: [build-local, classify]
+    context: fresh
+    idle_timeout: 900000
+    output_format:
+      type: object
+      properties:
+        verdict:
+          type: string
+          enum: [pass, fail]
+        new_version:
+          type: string
+          description: The version tag that was smoke-tested (e.g. v3.7.1)
+        summary:
+          type: string
+          description: One-paragraph human-readable summary
+        screenshots:
+          type: array
+          items:
+            type: string
+      required: [verdict, new_version, summary]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 6. Publish — only when smoke test passes. Pushes image, commits bumps,
+  #    creates matching git tag, pushes commit + tag.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: publish-release
+    command: publish-release
+    depends_on: [browser-smoke-test, classify]
+    when: "$browser-smoke-test.output.verdict == 'pass'"
+    context: fresh
+    idle_timeout: 1800000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 7. Report — always runs last, summarises the whole run to artifacts.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: report
+    prompt: |
+      Write a concise release report to $ARTIFACTS_DIR/release-report.md.
+      Use the information below. Keep it short (≤ 40 lines, markdown).
+
+      Classification:
+      $classify.output
+
+      Smoke test:
+      $browser-smoke-test.output
+
+      Publish step:
+      $publish-release.output
+
+      Structure:
+      # goclaw release report
+      - Current → new version
+      - Smoke test verdict + summary
+      - Publish outcome (image pushed? commit sha? tag?)
+      - Screenshots (list paths if any)
+
+      After writing, print the absolute path of the report file you wrote.
+    depends_on: [publish-release]
+    trigger_rule: all_done
+    model: haiku
+    allowed_tools: [Write, Bash]
