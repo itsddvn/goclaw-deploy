@@ -17,7 +17,8 @@ nodes:
   - id: guard-clean-worktree
     bash: |
       set -eo pipefail
-      DIRTY=$(git status --porcelain)
+      # Ignore .archon/ — it's the workflow runtime itself, not part of the release
+      DIRTY=$(git status --porcelain | grep -vE '^\?\? .archon/' || true)
       if [ -n "$DIRTY" ]; then
         echo "ERROR: working tree is not clean. Commit or stash before releasing." >&2
         echo "$DIRTY" >&2
