@@ -51,6 +51,7 @@ build:
 # Build for local platform and load into Docker
 build-local:
 	docker buildx build \
+		--builder default \
 		$(CORE_BUILD_ARGS) \
 		--platform $(LOCAL_ARCH) \
 		-f $(GOCLAW_DIR)/Dockerfile \
@@ -58,6 +59,7 @@ build-local:
 		--load \
 		$(GOCLAW_DIR)
 	docker buildx build \
+		--builder default \
 		--build-arg CORE_IMAGE=$(CORE_TAG) \
 		--platform $(LOCAL_ARCH) \
 		-f Dockerfile \
