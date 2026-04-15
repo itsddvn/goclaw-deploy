@@ -107,9 +107,31 @@ nodes:
   - id: build-local
     bash: |
       set -eo pipefail
-      echo "=== make build-local ==="
-      make build-local 2>&1 | tail -n 150
-      echo
+      # Read version from git tag in submodule
+      cd goclaw-core
+      VERSION=$(git describe --tags --match "v[0-9]*" --always 2>/dev/null || echo dev)
+      cd ..
+      CORE_TAG="itsddvn/goclaw:${VERSION}-core"
+      LOCAL_ARCH="linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')"
+
+      echo "=== Building core image (default builder, --load) ==="
+      docker buildx build --builder default \
+        --platform ${LOCAL_ARCH} \
+        -f goclaw-core/Dockerfile \
+        -t ${CORE_TAG} \
+        --load \
+        goclaw-core
+
+      echo "=== Building runtime image (default builder, --load) ==="
+      docker buildx build --builder default \
+        --build-arg CORE_IMAGE=${CORE_TAG} \
+        --platform ${LOCAL_ARCH} \
+        -f Dockerfile \
+        -t itsddvn/goclaw:${VERSION} \
+        -t itsddvn/goclaw:latest \
+        --load \
+        .
+
       echo "=== local images ==="
       docker image ls itsddvn/goclaw --format '{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}'
     depends_on: [update-submodule]
