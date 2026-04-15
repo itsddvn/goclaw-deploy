@@ -38,6 +38,8 @@ nodes:
   - id: detect-version
     bash: |
       set -eo pipefail
+      # Ensure submodule is checked out (fresh worktrees don't have it populated)
+      git submodule update --init goclaw-core
       cd goclaw-core
       git fetch --tags --quiet
       LATEST_TAG=$(git tag --sort=-v:refname --list 'v[0-9]*' | head -n1)
@@ -67,7 +69,7 @@ nodes:
 
       Reply ONLY with the JSON object matching the schema — no prose.
     depends_on: [detect-version]
-    model: haiku
+    #model: haiku
     allowed_tools: []
     output_format:
       type: object
@@ -178,5 +180,5 @@ nodes:
       After writing, print the absolute path of the report file you wrote.
     depends_on: [publish-release]
     trigger_rule: all_done
-    model: haiku
+    #model: haiku
     allowed_tools: [Write, Bash]
