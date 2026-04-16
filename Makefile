@@ -71,6 +71,7 @@ build-local:
 # Build multi-arch and push to DockerHub
 push:
 	docker buildx build \
+		--builder default \
 		$(CORE_BUILD_ARGS) \
 		--platform $(PLATFORMS) \
 		-f $(GOCLAW_DIR)/Dockerfile \
@@ -78,6 +79,7 @@ push:
 		--push \
 		$(GOCLAW_DIR)
 	docker buildx build \
+		--builder default \
 		--build-arg CORE_IMAGE=$(CORE_TAG) \
 		--platform $(PLATFORMS) \
 		-f Dockerfile \

@@ -107,45 +107,103 @@ nodes:
   - id: build-local
     bash: |
       set -eo pipefail
-      # Read version from git tag in submodule
-      cd goclaw-core
-      VERSION=$(git describe --tags --match "v[0-9]*" --always 2>/dev/null || echo dev)
-      cd ..
-      CORE_TAG="itsddvn/goclaw:${VERSION}-core"
-      LOCAL_ARCH="linux/$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')"
-
-      echo "=== Building core image (default builder, --load) ==="
-      docker buildx build --builder default \
-        --platform ${LOCAL_ARCH} \
-        -f goclaw-core/Dockerfile \
-        -t ${CORE_TAG} \
-        --load \
-        goclaw-core
-
-      echo "=== Building runtime image (default builder, --load) ==="
-      docker buildx build --builder default \
-        --build-arg CORE_IMAGE=${CORE_TAG} \
-        --platform ${LOCAL_ARCH} \
-        -f Dockerfile \
-        -t itsddvn/goclaw:${VERSION} \
-        -t itsddvn/goclaw:latest \
-        --load \
-        .
-
+      echo "=== make build-local ==="
+      make build-local 2>&1
+      echo
       echo "=== local images ==="
       docker image ls itsddvn/goclaw --format '{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}'
     depends_on: [update-submodule]
     timeout: 2700000
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 5. Smoke test — start the stack in an isolated compose project, run a
-  #    Playwright login flow, tear it down. Returns a pass/fail verdict.
+  # 5a. Smoke up — bring up an isolated compose project on non-default ports,
+  #     wait for the dashboard to respond. Deterministic bash, no AI.
   # ─────────────────────────────────────────────────────────────────────────
-  - id: browser-smoke-test
+  - id: smoke-up
+    bash: |
+      set -eo pipefail
+      export COMPOSE_PROJECT=goclaw-smoketest
+      export GOCLAW_HTTP_PORT=18080
+      export GOCLAW_API_PORT=18791
+      export PGADMIN_PORT=15050
+      export POSTGRES_PASSWORD=smoketest
+      export GOCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)
+      export GOCLAW_ENCRYPTION_KEY=$(openssl rand -hex 32)
+
+      # Persist the chosen ports / creds so downstream nodes can reuse them.
+      mkdir -p "$ARTIFACTS_DIR"
+      cat > "$ARTIFACTS_DIR/smoke-env.sh" <<EOF
+      export COMPOSE_PROJECT=$COMPOSE_PROJECT
+      export GOCLAW_HTTP_PORT=$GOCLAW_HTTP_PORT
+      export GOCLAW_API_PORT=$GOCLAW_API_PORT
+      export PGADMIN_PORT=$PGADMIN_PORT
+      export POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+      export GOCLAW_GATEWAY_TOKEN=$GOCLAW_GATEWAY_TOKEN
+      export GOCLAW_ENCRYPTION_KEY=$GOCLAW_ENCRYPTION_KEY
+      EOF
+
+      # Defensive pre-teardown in case a stale project exists from a prior run.
+      docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml down -v --remove-orphans >/dev/null 2>&1 || true
+
+      echo "=== docker compose up -d ==="
+      docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml up -d
+
+      echo "=== wait for dashboard on :$GOCLAW_HTTP_PORT ==="
+      for i in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$GOCLAW_HTTP_PORT/" || echo 000)
+        echo "attempt $i: $code"
+        case "$code" in
+          2*|3*) echo "ready"; exit 0 ;;
+        esac
+        sleep 2
+      done
+
+      echo "ERROR: dashboard never became ready after 120s" >&2
+      docker compose -p "$COMPOSE_PROJECT" logs --tail=80 goclaw-stack-core >&2 || true
+      exit 1
+    depends_on: [build-local]
+    when: "$classify.output.status == 'update_available'"
+    timeout: 240000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5b. Smoke browser — drive playwright against the running stack, write
+  #     $ARTIFACTS_DIR/verdict.json. AI is wrapped in the playwright-cli skill
+  #     so it has the tool knowledge it needs. No output_format — the JSON is
+  #     parsed by the read-verdict node from the file on disk, which is more
+  #     reliable than coaxing the SDK to return structured output from a
+  #     long-running browser session.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: smoke-browser
     command: browser-smoke-test
-    depends_on: [build-local, classify]
+    depends_on: [smoke-up]
     context: fresh
+    skills:
+      - playwright-cli
     idle_timeout: 900000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5c. Read verdict — a prompt node (output_format works on prompt nodes,
+  #     but is ignored on bash nodes) that reads $ARTIFACTS_DIR/verdict.json
+  #     and re-emits it as a validated structured object. Always produces a
+  #     fail-default when the file is missing or invalid so downstream
+  #     `when:` checks always have something to evaluate.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: read-verdict
+    prompt: |
+      Read the file at `$ARTIFACTS_DIR/verdict.json` using the Read tool.
+
+      - If the file exists AND is valid JSON AND contains `verdict`, `summary`,
+        and `new_version` — echo its content as the JSON object matching the
+        schema. Use empty array for screenshots if absent.
+      - If the file is missing OR not valid JSON OR missing any required
+        field — emit exactly:
+        {"verdict":"fail","new_version":"unknown","summary":"verdict.json missing or invalid — smoke-browser did not produce a parseable verdict","screenshots":[]}
+
+      Reply ONLY with the JSON object — no prose, no markdown fences.
+    depends_on: [smoke-browser]
+    trigger_rule: all_done
+    model: haiku
+    allowed_tools: [Read]
     output_format:
       type: object
       properties:
@@ -157,7 +215,6 @@ nodes:
           description: The version tag that was smoke-tested (e.g. v3.7.1)
         summary:
           type: string
-          description: One-paragraph human-readable summary
         screenshots:
           type: array
           items:
@@ -165,13 +222,26 @@ nodes:
       required: [verdict, new_version, summary]
 
   # ─────────────────────────────────────────────────────────────────────────
-  # 6. Publish — only when smoke test passes. Pushes image, commits bumps,
-  #    creates matching git tag, pushes commit + tag.
+  # 5d. Smoke down — ALWAYS runs when an update was attempted, even if the
+  #     browser step failed or was cancelled. Releases ports + volumes.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: smoke-down
+    bash: |
+      set +e
+      docker compose -p goclaw-smoketest -f docker-compose.yml down -v --remove-orphans 2>&1 | tail -n 40
+      exit 0
+    depends_on: [smoke-up, smoke-browser, read-verdict]
+    trigger_rule: all_done
+    when: "$classify.output.status == 'update_available'"
+    timeout: 180000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 6. Publish — only when the parsed verdict is pass AND teardown finished.
   # ─────────────────────────────────────────────────────────────────────────
   - id: publish-release
     command: publish-release
-    depends_on: [browser-smoke-test, classify]
-    when: "$browser-smoke-test.output.verdict == 'pass'"
+    depends_on: [read-verdict, smoke-down, classify]
+    when: "$read-verdict.output.verdict == 'pass'"
     context: fresh
     idle_timeout: 1800000
 
@@ -186,8 +256,11 @@ nodes:
       Classification:
       $classify.output
 
-      Smoke test:
-      $browser-smoke-test.output
+      Smoke test verdict:
+      $read-verdict.output
+
+      Teardown:
+      $smoke-down.output
 
       Publish step:
       $publish-release.output
@@ -198,9 +271,10 @@ nodes:
       - Smoke test verdict + summary
       - Publish outcome (image pushed? commit sha? tag?)
       - Screenshots (list paths if any)
+      - Any cleanup notes
 
       After writing, print the absolute path of the report file you wrote.
-    depends_on: [publish-release]
+    depends_on: [classify, read-verdict, smoke-down, publish-release]
     trigger_rule: all_done
     #model: haiku
     allowed_tools: [Write, Bash]
