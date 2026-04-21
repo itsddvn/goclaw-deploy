@@ -28,12 +28,20 @@ CORE_BUILD_ARGS = \
 
 COMPOSE_PROD    ?= docker-compose.yml
 COMPOSE_DOKPLOY ?= docker-compose-dokploy.yml
+BUILDER_NAME    ?= goclaw-multiarch
 
-.PHONY: build build-local push all version clean update
+.PHONY: build build-local push all version clean update ensure-builder
+
+# Create a docker-container builder for multi-arch builds + register QEMU
+ensure-builder:
+	@docker run --rm --privileged multiarch/qemu-user-static --reset -p yes >/dev/null 2>&1 || true
+	@docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 \
+		|| docker buildx create --name $(BUILDER_NAME) --driver docker-container --use --bootstrap
 
 # Build multi-arch images (pushes core to registry so step 2 can FROM it)
-build:
+build: ensure-builder
 	docker buildx build \
+		--builder $(BUILDER_NAME) \
 		$(CORE_BUILD_ARGS) \
 		--platform $(PLATFORMS) \
 		-f $(GOCLAW_DIR)/Dockerfile \
@@ -41,6 +49,7 @@ build:
 		--push \
 		$(GOCLAW_DIR)
 	docker buildx build \
+		--builder $(BUILDER_NAME) \
 		--build-arg CORE_IMAGE=$(CORE_TAG) \
 		--platform $(PLATFORMS) \
 		-f Dockerfile \
@@ -69,9 +78,9 @@ build-local:
 		.
 
 # Build multi-arch and push to DockerHub
-push:
+push: ensure-builder
 	docker buildx build \
-		--builder default \
+		--builder $(BUILDER_NAME) \
 		$(CORE_BUILD_ARGS) \
 		--platform $(PLATFORMS) \
 		-f $(GOCLAW_DIR)/Dockerfile \
@@ -79,7 +88,7 @@ push:
 		--push \
 		$(GOCLAW_DIR)
 	docker buildx build \
-		--builder default \
+		--builder $(BUILDER_NAME) \
 		--build-arg CORE_IMAGE=$(CORE_TAG) \
 		--platform $(PLATFORMS) \
 		-f Dockerfile \
