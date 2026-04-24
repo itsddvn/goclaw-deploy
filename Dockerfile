@@ -8,6 +8,10 @@
 #   make push          (multi-arch, pushes to registry)
 
 ARG CORE_IMAGE=itsddvn/goclaw:latest-core
+ARG UV_VERSION=0.11.7
+
+# ── Stage 0: Pinned uv/uvx binaries ──
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-bin
 
 # ── Stage 1: Build web UI ──
 FROM node:22-alpine AS webbuilder
@@ -26,6 +30,15 @@ RUN pnpm build
 
 # ── Stage 2: All-in-one runtime (core + caddy + web UI) ──
 FROM ${CORE_IMAGE}
+
+# Install pinned uv/uvx binaries into the final all-in-one image and fail the build if either binary is unavailable.
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
+RUN set -eux; \
+    uv --version; \
+    uvx --version
+
+ENV UV_CACHE_DIR=/app/data/.runtime/pip-cache \
+    UV_TOOL_BIN_DIR=/app/data/.runtime/bin
 
 # Add caddy for serving web UI + reverse proxying to goclaw backend (supports auto HTTPS)
 RUN apk add --no-cache caddy

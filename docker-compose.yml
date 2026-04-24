@@ -18,7 +18,7 @@
 services:
   goclaw-stack-core:
     #container_name: goclaw-stack-core
-    image: itsddvn/goclaw:v3.10.0
+    image: itsddvn/goclaw:v3.10.0-build-2
     volumes:
       - goclaw-data:/app/data
       - goclaw-workspace:/app/workspace
